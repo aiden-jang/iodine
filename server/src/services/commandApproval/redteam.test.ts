@@ -8,8 +8,7 @@ import { findMatch, saveRule } from './rules';
 import { describeCommand } from './signature';
 
 /**
- * The cases this feature exists to get right. Nothing here is ever deleted, only added to:
- * a failure means a command could be run without the user being asked.
+ * A failure here means a command ran without the user being asked, so this file only grows.
  */
 
 let workspace: string;

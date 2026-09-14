@@ -157,3 +157,13 @@ export async function logMatch(
 }
 
 export type { Capability };
+
+/** Plain-language description of what approving this command would allow, for the button. */
+export function ruleLabel(part: CommandPart, workspacePath: string): string {
+  const { program, subcommand, flags } = part.signature;
+  const head = [program, subcommand, ...flags].filter(Boolean).join(' ');
+  const prefix = commonAncestor(part.paths);
+  if (!prefix) return `any ${head}`;
+  const relative = path.relative(workspacePath, prefix);
+  return `any ${head} in ${relative || 'this project'}`;
+}

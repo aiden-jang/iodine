@@ -72,10 +72,12 @@ function resolvePath(raw: string, cwd: string): { path: string; exists: boolean 
 function expandFlag(flag: string, program: string): string[] {
   const aliases = FLAG_ALIASES[program] ?? {};
   if (flag.startsWith('--')) return [flag];
-  // A cluster like -rf is the same as -r -f; anything with a value is left whole.
+
+  // A cluster like -rf is the same as -r -f, but a long single-dash flag like find's
+  // -exec is not. Only split when every letter is a flag we know for this program.
   const chars = flag.slice(1);
-  if (chars.length > 1 && /^[A-Za-z]+$/.test(chars)) {
-    return chars.split('').map(c => aliases[`-${c}`] ?? `-${c}`);
+  if (chars.length > 1 && chars.split('').every(c => aliases[`-${c}`])) {
+    return chars.split('').map(c => aliases[`-${c}`]);
   }
   return [aliases[flag] ?? flag];
 }

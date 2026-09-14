@@ -122,6 +122,16 @@ describe('flags', () => {
     expect(a.flags).toEqual(b.flags);
   });
 
+  it('keeps a long single-dash flag whole instead of splitting it', () => {
+    const [cmd] = ok(normalize('find . -exec rm {} ;', workspace));
+    expect(cmd.flags).toEqual(['-exec']);
+  });
+
+  it('only splits a cluster when every letter is a flag it knows', () => {
+    const [cmd] = ok(normalize('ls -la', workspace));
+    expect(cmd.flags).toEqual(['-la']);
+  });
+
   it('leaves an unknown short flag alone', () => {
     const [cmd] = ok(normalize('somecmd -x file', workspace));
     expect(cmd.flags).toEqual(['-x']);

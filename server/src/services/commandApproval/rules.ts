@@ -158,12 +158,17 @@ export async function logMatch(
 
 export type { Capability };
 
+function label(signature: Signature, prefix: string | null, workspacePath: string): string {
+  const head = [signature.program, signature.subcommand, ...signature.flags].filter(Boolean).join(' ');
+  if (!prefix) return `any ${head}`;
+  return `any ${head} in ${path.relative(workspacePath, prefix) || 'this project'}`;
+}
+
 /** Plain-language description of what approving this command would allow, for the button. */
 export function ruleLabel(part: CommandPart, workspacePath: string): string {
-  const { program, subcommand, flags } = part.signature;
-  const head = [program, subcommand, ...flags].filter(Boolean).join(' ');
-  const prefix = commonAncestor(part.paths);
-  if (!prefix) return `any ${head}`;
-  const relative = path.relative(workspacePath, prefix);
-  return `any ${head} in ${relative || 'this project'}`;
+  return label(part.signature, commonAncestor(part.paths), workspacePath);
+}
+
+export function ruleSummary(rule: ApprovalRule, workspacePath: string): string {
+  return label(rule, rule.pathPrefix, workspacePath);
 }

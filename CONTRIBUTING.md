@@ -53,14 +53,17 @@ iodine/
 
 - Node.js 18+
 - npm 9+
-- At least one AI provider API key
+- At least one AI provider API key — Anthropic, OpenAI, or Google
 
 ### Install and run
 
 ```bash
 npm install
+cp .env.example .env   # add at least one API key
 npm run dev
 ```
+
+`.env` is read from the project root at server startup and is gitignored. Anything already set in your shell wins over the file.
 
 The client runs at `http://localhost:5173`; the server runs at `http://localhost:3001`.
 

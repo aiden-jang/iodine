@@ -92,7 +92,7 @@ System View is interactive documentation generated from the code that is actuall
 
 - Node.js 18+
 - npm 9+
-- At least one AI provider API key (see [Coding Assistant](CONTRIBUTING.md#coding-assistant))
+- At least one AI provider API key — Anthropic, OpenAI, or Google
 
 ### Installation & Running
 
@@ -100,9 +100,14 @@ System View is interactive documentation generated from the code that is actuall
 # Install all dependencies (client + server)
 npm install
 
+# Add at least one API key
+cp .env.example .env   # then edit it
+
 # Start both client and server in development mode
 npm run dev
 ```
+
+`.env` lives in the project root and is gitignored. Leave the providers you do not use blank. Variables already set in your shell take precedence, so a deployment can supply keys its own way. The **?** button beside the model picker shows the same instructions in the app.
 
 - **Client** (React + Vite): http://localhost:5173
 - **Server** (Express): http://localhost:3001

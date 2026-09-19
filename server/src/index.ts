@@ -1,6 +1,11 @@
+import path from 'path';
 import { createServer } from 'http';
+import dotenv from 'dotenv';
 import { createApp } from './app';
 import { setupTerminalWebSocket } from './terminal';
+
+// The server runs from server/, but the .env documented in .env.example sits at the repo root.
+dotenv.config({ path: path.join(__dirname, '..', '..', '.env'), quiet: true });
 
 const PORT = 3001;
 const app = createApp();

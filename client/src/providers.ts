@@ -28,10 +28,11 @@ export const PROVIDERS: Provider[] = [
     ],
     setupTitle: 'Anthropic API key',
     setupInstructions:
-      'Provide your key using either method:\n\n' +
-      '  • File: ~/.anthropic/api_key\n' +
-      '  • Env var: ANTHROPIC_API_KEY\n\n' +
-      'If you use Claude Code the key is already stored in ~/.anthropic/api_key.',
+      'Add your key to .env in the project root, then restart the server:\n\n' +
+      '  ANTHROPIC_API_KEY=sk-ant-...\n\n' +
+      'Copy .env.example to .env if you do not have one yet.\n\n' +
+      'Also works: the file ~/.anthropic/api_key, where Claude Code already stores it, ' +
+      'or ANTHROPIC_API_KEY exported in your shell.',
   },
   {
     id: 'openai',
@@ -44,7 +45,11 @@ export const PROVIDERS: Provider[] = [
       { id: 'o4-mini',       label: 'o4-mini' },
     ],
     setupTitle: 'OpenAI API key',
-    setupInstructions: 'Set OPENAI_TOKEN in your environment:\n\n  export OPENAI_TOKEN=sk-...',
+    setupInstructions:
+      'Add your key to .env in the project root, then restart the server:\n\n' +
+      '  OPENAI_TOKEN=sk-...\n\n' +
+      'Copy .env.example to .env if you do not have one yet. ' +
+      'An OPENAI_TOKEN exported in your shell works too.',
   },
   {
     id: 'google',
@@ -58,7 +63,11 @@ export const PROVIDERS: Provider[] = [
       { id: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash' },
     ],
     setupTitle: 'Google AI API key',
-    setupInstructions: 'Set GEMINI_API_KEY in your environment:\n\n  export GEMINI_API_KEY=AIza...',
+    setupInstructions:
+      'Add your key to .env in the project root, then restart the server:\n\n' +
+      '  GEMINI_API_KEY=AIza...\n\n' +
+      'Copy .env.example to .env if you do not have one yet. ' +
+      'A GEMINI_API_KEY exported in your shell works too.',
   },
 ];
 

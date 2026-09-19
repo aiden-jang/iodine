@@ -12,8 +12,13 @@ const execFileAsync = promisify(execFile);
 /**
  * Rollout switch, off unless asked for. While off, matches are still found and written to
  * approval-log.jsonl so the log can be read before anyone trusts it.
+ *
+ * Read on each call, not at import time: imports run before index.ts loads .env, so a
+ * module-level constant would never see the variable.
  */
-export const AUTO_APPROVE_ENABLED = ['1', 'true'].includes(process.env.IODINE_AUTO_APPROVE ?? '');
+export function autoApproveEnabled(): boolean {
+  return ['1', 'true'].includes(process.env.IODINE_AUTO_APPROVE ?? '');
+}
 
 export interface ApprovalRule extends Signature {
   id: string;

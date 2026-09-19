@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { Response } from 'express';
 import { rootPath } from '../state';
 import type { ToolResult } from './fileTools';
-import { AUTO_APPROVE_ENABLED, findMatch, logMatch, ruleLabel, saveRule } from './commandApproval/rules';
+import { autoApproveEnabled, findMatch, logMatch, ruleLabel, saveRule } from './commandApproval/rules';
 import { describeCommand, type CommandPart } from './commandApproval/signature';
 
 export interface TerminalCommandRequest {
@@ -35,7 +35,7 @@ async function inspect(command: string): Promise<{ parts: CommandPart[] | null; 
   if (!described.ok) return { parts: null, matched: false };
 
   const matched = await findMatch(rootPath, described.parts);
-  if (matched) await logMatch(rootPath, command, matched, AUTO_APPROVE_ENABLED);
+  if (matched) await logMatch(rootPath, command, matched, autoApproveEnabled());
   return { parts: described.parts, matched: matched !== null };
 }
 
@@ -49,7 +49,7 @@ export async function requestTerminalApproval(
   const { parts, matched } = await inspect(request.command);
   const remembered = parts !== null && parts.every(p => p.approvable);
 
-  if (matched && AUTO_APPROVE_ENABLED) {
+  if (matched && autoApproveEnabled()) {
     res.write(`event: command_approval\ndata: ${JSON.stringify({ id, command: request.command, reason: request.reason, longRunning: request.longRunning, cwd: rootPath, autoApproved: true })}\n\n`);
     return true;
   }

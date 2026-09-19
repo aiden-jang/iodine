@@ -11,10 +11,10 @@ import { sameSignature, type CommandPart, type Signature } from './signature';
 const execFileAsync = promisify(execFile);
 
 /**
- * Rules are recorded and matched, but nothing is auto-approved yet. Flip this on once the
- * log shows the matches are the ones we expected.
+ * Rollout switch, off unless asked for. While off, matches are still found and written to
+ * approval-log.jsonl so the log can be read before anyone trusts it.
  */
-export const AUTO_APPROVE_ENABLED = false;
+export const AUTO_APPROVE_ENABLED = ['1', 'true'].includes(process.env.IODINE_AUTO_APPROVE ?? '');
 
 export interface ApprovalRule extends Signature {
   id: string;

@@ -368,7 +368,7 @@ A rule is scoped to the deepest folder containing everything the command touched
 
 The server re-checks approvability on resolve rather than trusting the client's `remember` flag.
 
-**`AUTO_APPROVE_ENABLED` in `rules.ts` is `false`.** Matches are found and appended to `approval-log.jsonl` with `applied: false`, but nothing is skipped yet. Read that log on real usage before turning it on. macOS and Linux only; the path logic is POSIX, so Windows never auto-approves.
+**Auto-approval is off unless `IODINE_AUTO_APPROVE=1`.** `AUTO_APPROVE_ENABLED` in `rules.ts` reads that variable at startup. While off, matches are still found and appended to `approval-log.jsonl` with `applied: false`, and the user is asked as usual — read that log on real usage before turning it on. macOS and Linux only; the path logic is POSIX, so Windows never auto-approves.
 
 `redteam.test.ts` holds the pairs that must never match, plus control cases so a matcher that always says no cannot pass it. A failure there means a command ran without the user being asked, so the file only grows.
 

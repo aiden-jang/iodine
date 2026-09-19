@@ -29,7 +29,7 @@ const SYSTEM_ROOTS = SYSTEM_ROOT_NAMES.flatMap(dir => {
 
 const URL_PATTERN = /^([a-z][a-z0-9+.-]*:\/\/|[\w.-]+@[\w.-]+:)/i;
 
-/** True when child is parent or sits beneath it, comparing whole segments. */
+/** Compares whole segments, so /a/bc is not under /a/b. */
 export function isUnder(child: string, parent: string): boolean {
   if (child === parent) return true;
   return child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);

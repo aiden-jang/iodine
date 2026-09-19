@@ -25,6 +25,15 @@ export type DescribeResult =
   | { ok: true; parts: CommandPart[] }
   | { ok: false; reason: string };
 
+const ZERO_CAPABILITY: Capability = {
+  readsFiles: false,
+  writesFiles: false,
+  deletesFiles: false,
+  network: false,
+  spawnsProcesses: false,
+  changesSystem: false,
+};
+
 /** Anything pointing outside the project has to be approved every time. */
 const APPROVABLE_CLASSES = new Set<OperandClass>(['inside-project']);
 
@@ -64,15 +73,6 @@ export function describeCommand(command: string, cwd: string, rootPath: string |
 
   return { ok: true, parts };
 }
-
-const ZERO_CAPABILITY: Capability = {
-  readsFiles: false,
-  writesFiles: false,
-  deletesFiles: false,
-  network: false,
-  spawnsProcesses: false,
-  changesSystem: false,
-};
 
 export function sameSignature(a: Signature, b: Signature): boolean {
   return (

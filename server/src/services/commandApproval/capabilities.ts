@@ -44,7 +44,6 @@ const RUN = cap('readsFiles', 'writesFiles', 'spawnsProcesses');
 
 interface ProgramEntry {
   capability?: Capability;
-  /** Defaults to true. */
   approvable?: boolean;
   /** When present, the first operand names the subcommand. */
   subcommands?: Record<string, ProgramEntry>;
@@ -52,6 +51,19 @@ interface ProgramEntry {
 
 /** The real action is decided by a script or an argument we cannot see, so it can never become a rule. */
 const WRAPPER: ProgramEntry = { capability: RUN, approvable: false };
+
+const PACKAGE_MANAGER: ProgramEntry = {
+  subcommands: {
+    ls: { capability: READ },
+    view: { capability: NET },
+    install: { capability: NET_WRITE },
+    ci: { capability: NET_WRITE },
+    test: WRAPPER,
+    start: WRAPPER,
+    run: WRAPPER,
+    exec: WRAPPER,
+  },
+};
 
 const PROGRAMS: Record<string, ProgramEntry> = {
   ls: { capability: READ },
@@ -139,22 +151,10 @@ const PROGRAMS: Record<string, ProgramEntry> = {
     },
   },
 
-  npm: {
-    subcommands: {
-      ls: { capability: READ },
-      view: { capability: NET },
-      install: { capability: NET_WRITE },
-      ci: { capability: NET_WRITE },
-      test: WRAPPER,
-      start: WRAPPER,
-      run: WRAPPER,
-      exec: WRAPPER,
-    },
-  },
+  npm: PACKAGE_MANAGER,
+  yarn: PACKAGE_MANAGER,
+  pnpm: PACKAGE_MANAGER,
 };
-
-PROGRAMS.yarn = PROGRAMS.npm;
-PROGRAMS.pnpm = PROGRAMS.npm;
 
 export function lookupCapability(command: ResolvedCommand): CapabilityLookup {
   const entry = PROGRAMS[command.program];

@@ -43,7 +43,6 @@ function describeOrThrow(command: string) {
   return result.parts;
 }
 
-/** True when the command could be saved as a rule at all. */
 function canBeRemembered(command: string): boolean {
   const parts = describeOrThrow(command);
   return parts !== null && parts.length > 0 && parts.every(p => p.approvable);

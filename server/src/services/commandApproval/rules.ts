@@ -4,7 +4,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
-import type { Capability } from './capabilities';
 import { coveredByPrefix } from './operands';
 import { sameSignature, type CommandPart, type Signature } from './signature';
 
@@ -96,7 +95,7 @@ async function isGitIgnored(workspacePath: string, target: string): Promise<bool
   }
 }
 
-async function ruleCovers(workspacePath: string, rule: ApprovalRule, part: CommandPart): Promise<boolean> {
+async function ruleReaches(workspacePath: string, rule: ApprovalRule, part: CommandPart): Promise<boolean> {
   if (!sameSignature(rule, part.signature)) return false;
   if (rule.pathPrefix === null) return part.paths.length === 0;
 
@@ -120,7 +119,7 @@ export async function findMatch(workspacePath: string, parts: CommandPart[]): Pr
   for (const part of parts) {
     let hit: ApprovalRule | undefined;
     for (const rule of rules) {
-      if (await ruleCovers(workspacePath, rule, part)) {
+      if (await ruleReaches(workspacePath, rule, part)) {
         hit = rule;
         break;
       }
@@ -155,8 +154,6 @@ export async function logMatch(
     // The log is for us, not the user; never fail an approval because it could not be written.
   }
 }
-
-export type { Capability };
 
 function label(signature: Signature, prefix: string | null, workspacePath: string): string {
   const head = [signature.program, signature.subcommand, ...signature.flags].filter(Boolean).join(' ');

@@ -60,7 +60,7 @@ export async function requestTerminalApproval(
     reason: request.reason,
     longRunning: request.longRunning,
     cwd: rootPath,
-    rememberLabel: remembered && workspace ? parts.map(p => ruleLabel(p, workspace)).join(", ") : null,
+    rememberLabel: remembered && workspace ? parts.map(p => ruleLabel(p, workspace)).join(', ') : null,
   })}\n\n`);
 
   return new Promise<boolean>((resolve) => {
@@ -92,11 +92,10 @@ export async function resolveTerminalApproval(id: string, approved: boolean, rem
   if (!pending) return false;
 
   if (approved && remember && pending.parts && rootPath) {
-    // A rule the user asked for should never cost them the approval they just gave.
     try {
       for (const part of pending.parts) await saveRule(rootPath, part);
     } catch {
-      // ignored
+      // Failing to remember must never cost the user the approval they just gave.
     }
   }
 

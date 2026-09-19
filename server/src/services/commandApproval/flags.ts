@@ -14,7 +14,6 @@ const RISK_WEIGHT: Record<string, number> = {
   '--force': 2,
   '--recursive': 2,
   '--no-preserve-root': BLOCKED,
-  '--preserve-root=all': 0,
 };
 
 const PROGRAM_RISK: Record<string, Record<string, number>> = {

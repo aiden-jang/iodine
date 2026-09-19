@@ -102,6 +102,60 @@ function splitSegments(tokens: ReturnType<typeof tokenize>): Segment[] | string 
   return segments.filter(s => s.length > 0);
 }
 
+type SegmentFailure = { ok: false; reason: 'unresolvable' | 'never-allowed'; detail: string };
+
+function rejectProgram(program: string, segment: Segment, piped: boolean): SegmentFailure | null {
+  if (PRIVILEGE_ESCALATORS.has(program)) {
+    return { ok: false, reason: 'never-allowed', detail: `${program} escalates privileges` };
+  }
+  if (SHELLS.has(program) && (piped || segment.includes('-c'))) {
+    return { ok: false, reason: 'never-allowed', detail: `${program} runs an unknown script` };
+  }
+  return null;
+}
+
+function readArguments(
+  segment: Segment,
+  program: string,
+  cwd: string,
+): { flags: string[]; operands: ResolvedOperand[] } | SegmentFailure {
+  const flags: string[] = [];
+  const operands: ResolvedOperand[] = [];
+  let literalOnly = false;
+
+  for (const token of segment.slice(1)) {
+    if (typeof token !== 'string') {
+      operands.push({ raw: token.pattern, path: token.pattern, exists: false, isGlob: true });
+      continue;
+    }
+    if (token === '--') {
+      literalOnly = true;
+      continue;
+    }
+    if (!literalOnly && token.startsWith('-') && token.length > 1) {
+      flags.push(...expandFlag(token, program));
+      continue;
+    }
+    // `~user` expands from the password database, which we cannot read here.
+    if (token.startsWith('~') && token !== '~' && !token.startsWith('~/')) {
+      return { ok: false, reason: 'unresolvable', detail: 'user home expansion' };
+    }
+    const { path: resolved, exists } = resolvePath(token, cwd);
+    operands.push({ raw: token, path: resolved, exists, isGlob: false });
+  }
+
+  return { flags: [...flags].sort(), operands };
+}
+
+/** `cd` is not an action to remember; it only moves where the next command resolves from. */
+function nextCwd(operands: ResolvedOperand[]): string | SegmentFailure {
+  if (operands.length === 0) return os.homedir();
+  if (operands.length > 1 || operands[0].isGlob || operands[0].raw === '-') {
+    return { ok: false, reason: 'unresolvable', detail: 'cd target cannot be resolved' };
+  }
+  return operands[0].path;
+}
+
 export function normalize(command: string, cwd: string): NormalizeResult {
   const trimmed = command.trim();
   if (!trimmed) return { ok: false, reason: 'unresolvable', detail: 'empty command' };
@@ -125,51 +179,20 @@ export function normalize(command: string, cwd: string): NormalizeResult {
     }
     const program = path.basename(head);
 
-    if (PRIVILEGE_ESCALATORS.has(program)) {
-      return { ok: false, reason: 'never-allowed', detail: `${program} escalates privileges` };
-    }
-    if (SHELLS.has(program) && (piped || segment.includes('-c'))) {
-      return { ok: false, reason: 'never-allowed', detail: `${program} runs an unknown script` };
-    }
+    const rejected = rejectProgram(program, segment, piped);
+    if (rejected) return rejected;
 
-    const flags: string[] = [];
-    const operands: ResolvedOperand[] = [];
-    let literalOnly = false;
-
-    for (const token of segment.slice(1)) {
-      if (typeof token !== 'string') {
-        operands.push({ raw: token.pattern, path: token.pattern, exists: false, isGlob: true });
-        continue;
-      }
-      if (token === '--') {
-        literalOnly = true;
-        continue;
-      }
-      if (!literalOnly && token.startsWith('-') && token.length > 1) {
-        flags.push(...expandFlag(token, program));
-        continue;
-      }
-      // `~user` expands from the password database, which we cannot read here.
-      if (token.startsWith('~') && token !== '~' && !token.startsWith('~/')) {
-        return { ok: false, reason: 'unresolvable', detail: 'user home expansion' };
-      }
-      const { path: resolved, exists } = resolvePath(token, cursor);
-      operands.push({ raw: token, path: resolved, exists, isGlob: false });
-    }
+    const args = readArguments(segment, program, cursor);
+    if ('ok' in args) return args;
 
     if (program === 'cd') {
-      if (operands.length === 0) {
-        cursor = os.homedir();
-        continue;
-      }
-      if (operands.length > 1 || operands[0].isGlob || operands[0].raw === '-') {
-        return { ok: false, reason: 'unresolvable', detail: 'cd target cannot be resolved' };
-      }
-      cursor = operands[0].path;
+      const moved = nextCwd(args.operands);
+      if (typeof moved !== 'string') return moved;
+      cursor = moved;
       continue;
     }
 
-    commands.push({ program, flags: [...flags].sort(), operands, cwd: cursor });
+    commands.push({ program, flags: args.flags, operands: args.operands, cwd: cursor });
   }
 
   if (commands.length === 0) {

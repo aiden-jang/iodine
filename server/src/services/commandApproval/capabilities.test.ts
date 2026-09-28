@@ -46,7 +46,7 @@ describe('subcommands', () => {
 });
 
 describe('programs whose real work is defined elsewhere', () => {
-  it.each([['npm test'], ['npm run build'], ['make deploy'], ['node build.js'], ['find . -name x']])(
+  it.each([['npm test'], ['npm run build'], ['npm install'], ['npm ci'], ['yarn install'], ['pnpm install'], ['make deploy'], ['node build.js'], ['find . -name x']])(
     'refuses to make %s approvable',
     command => {
       expect(look(command)).toMatchObject({ known: true, approvable: false });

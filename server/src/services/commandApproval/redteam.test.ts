@@ -83,6 +83,11 @@ describe('these can never be remembered, whatever the user clicks', () => {
     ['a flag that removes the last safety net', 'rm --no-preserve-root /'],
     ['a binary we have never seen', 'mysterytool --wipe-everything'],
     ['a cd that leaves the project', 'cd ~/ && rm -rf src'],
+    ['a local executable named after a known command', './rm -f src/file'],
+    ['a failed cd before a conditional delete', 'cd missing || rm -f ../outside'],
+    ['a package install with lifecycle scripts', 'npm install'],
+    ['a recursive project delete', 'rm -rf src'],
+    ['a git clean that can delete unlisted files', 'git clean -fdx'],
   ])('refuses %s', (_label, command) => {
     expect(canBeRemembered(command)).toBe(false);
   });
@@ -90,14 +95,14 @@ describe('these can never be remembered, whatever the user clicks', () => {
 
 describe('approving one thing never quietly approves another', () => {
   it.each([
-    ['a project folder', 'rm -rf dist', 'the home directory', 'rm -rf ~/'],
-    ['a project folder', 'rm -rf dist', 'a sibling folder', 'rm -rf src'],
-    ['reading a folder', 'ls src', 'deleting it', 'rm -rf src'],
+    ['a project file', 'rm -f dist/file', 'the home directory', 'rm -f ~/'],
+    ['a project file', 'rm -f dist/file', 'a sibling file', 'rm -f src/file'],
+    ['reading a folder', 'ls src', 'deleting a file inside it', 'rm -f src/file'],
     ['reading a folder', 'ls src', 'reading a secret inside it', 'ls src/.env'],
     ['reading a folder', 'ls src', 'reading its git internals', 'ls src/.git/config'],
     ['reading a folder', 'ls src', 'following a symlink out of it', 'ls src/out-link'],
     ['the whole project', 'ls .', 'a gitignored folder', 'ls dist'],
-    ['a careful delete', 'rm -r dist', 'a forced one', 'rm -rf dist'],
+    ['a careful delete', 'rm dist/file', 'a forced one', 'rm -f dist/file'],
     ['checking git status', 'git status', 'pushing to a remote', 'git push'],
     ['checking git status', 'git status', 'discarding local changes', 'git clean -fdx'],
     ['copying inside the project', 'cp src/a src/b', 'copying out to home', 'cp src/a ~/b'],
@@ -121,5 +126,10 @@ describe('control cases, so a matcher that always says no cannot pass this file'
   it('does not care about quoting or redundant path segments', async () => {
     await approve('ls src');
     expect(await runsWithoutAsking('ls "./src"')).toBe(true);
+  });
+
+  it('still matches a non-recursive delete inside the approved path', async () => {
+    await approve('rm -f src/file');
+    expect(await runsWithoutAsking('rm -f src/file')).toBe(true);
   });
 });

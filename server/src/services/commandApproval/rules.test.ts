@@ -56,7 +56,7 @@ describe('commonAncestor', () => {
 
 describe('saving and loading', () => {
   it('stores a rule scoped to the folder that was approved', async () => {
-    const rule = await saveRule(workspace, parts('rm -rf dist')[0]);
+    const rule = await saveRule(workspace, parts('ls dist')[0]);
     expect(rule.pathPrefix).toBe(path.join(workspace, 'dist'));
     expect(await loadRules(workspace)).toHaveLength(1);
   });
@@ -95,13 +95,13 @@ describe('matching', () => {
   });
 
   it('does not match once a flag is added', async () => {
-    await saveRule(workspace, parts('rm -rf dist')[0]);
-    expect(await findMatch(workspace, parts('rm -r dist'))).toBeNull();
+    await saveRule(workspace, parts('rm dist/file')[0]);
+    expect(await findMatch(workspace, parts('rm -f dist/file'))).toBeNull();
   });
 
   it('does not let a read rule cover a delete', async () => {
     await saveRule(workspace, parts('ls src')[0]);
-    expect(await findMatch(workspace, parts('rm -rf src'))).toBeNull();
+    expect(await findMatch(workspace, parts('rm -f src/file'))).toBeNull();
   });
 
   it('does not match a hidden file inside the approved folder', async () => {
@@ -115,8 +115,8 @@ describe('matching', () => {
   });
 
   it('still allows a rule aimed straight at a gitignored folder', async () => {
-    await saveRule(workspace, parts('rm -rf dist')[0]);
-    expect(await findMatch(workspace, parts('rm -rf dist'))).toHaveLength(1);
+    await saveRule(workspace, parts('ls dist')[0]);
+    expect(await findMatch(workspace, parts('ls dist'))).toHaveLength(1);
   });
 
   it('returns nothing when there are no rules', async () => {
@@ -133,13 +133,13 @@ describe('matching', () => {
 describe('chains', () => {
   it('needs every part of the chain to be covered', async () => {
     await saveRule(workspace, parts('ls src')[0]);
-    expect(await findMatch(workspace, parts('ls src && rm -rf dist'))).toBeNull();
+    expect(await findMatch(workspace, parts('ls src && rm -f dist/file'))).toBeNull();
   });
 
   it('matches once both parts have a rule', async () => {
     await saveRule(workspace, parts('ls src')[0]);
-    await saveRule(workspace, parts('rm -rf dist')[0]);
-    expect(await findMatch(workspace, parts('ls src && rm -rf dist'))).toHaveLength(2);
+    await saveRule(workspace, parts('rm -f dist/file')[0]);
+    expect(await findMatch(workspace, parts('ls src && rm -f dist/file'))).toHaveLength(2);
   });
 
   it('never matches a chain containing something unapprovable', async () => {
@@ -150,7 +150,7 @@ describe('chains', () => {
 
 describe('the pair this whole feature exists for', () => {
   it('does not let an approved project delete cover the home directory', async () => {
-    await saveRule(workspace, parts('rm -rf dist')[0]);
-    expect(await findMatch(workspace, parts('rm -rf ~/'))).toBeNull();
+    await saveRule(workspace, parts('rm -f dist/file')[0]);
+    expect(await findMatch(workspace, parts('rm -f ~/'))).toBeNull();
   });
 });

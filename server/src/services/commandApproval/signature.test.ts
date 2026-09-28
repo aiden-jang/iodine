@@ -29,11 +29,11 @@ function only(command: string): CommandPart {
 
 describe('what can become a rule', () => {
   it('allows a delete inside the project', () => {
-    expect(only('rm -rf .build')).toMatchObject({ approvable: true, reason: null });
+    expect(only('rm -f src/file.txt')).toMatchObject({ approvable: true, reason: null });
   });
 
   it('refuses the same delete aimed at home', () => {
-    expect(only('rm -rf ~/')).toMatchObject({ approvable: false, reason: 'a target is home, not inside the project' });
+    expect(only('rm -f ~/')).toMatchObject({ approvable: false, reason: 'a target is home, not inside the project' });
   });
 
   it('refuses a command whose work is defined elsewhere', () => {
@@ -46,6 +46,12 @@ describe('what can become a rule', () => {
 
   it('refuses a blocked flag', () => {
     expect(only('rm --no-preserve-root src').approvable).toBe(false);
+  });
+
+  it('refuses recursive deletion and git clean', () => {
+    expect(only('rm -rf src').approvable).toBe(false);
+    expect(only('rm -r src').approvable).toBe(false);
+    expect(only('git clean -fdx').approvable).toBe(false);
   });
 
   it('refuses a glob, since we cannot tell what it hits', () => {

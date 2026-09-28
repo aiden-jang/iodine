@@ -85,21 +85,23 @@ function expandFlag(flag: string, program: string): string[] {
 type GlobToken = { op: 'glob'; pattern: string };
 type Segment = (string | GlobToken)[];
 
-function splitSegments(tokens: ReturnType<typeof tokenize>): Segment[] | string {
+function splitSegments(tokens: ReturnType<typeof tokenize>): { segments: Segment[]; separators: string[] } | string {
   const segments: Segment[] = [];
+  const separators: string[] = [];
   let current: Segment = [];
 
   for (const token of tokens) {
     if (typeof token === 'object' && 'op' in token && token.op !== 'glob') {
       if (!SEPARATORS.has(token.op)) return token.op;
       segments.push(current);
+      separators.push(token.op);
       current = [];
       continue;
     }
     current.push(token as string | GlobToken);
   }
   segments.push(current);
-  return segments.filter(s => s.length > 0);
+  return { segments: segments.filter(s => s.length > 0), separators };
 }
 
 type SegmentFailure = { ok: false; reason: 'unresolvable' | 'never-allowed'; detail: string };
@@ -163,9 +165,14 @@ export function normalize(command: string, cwd: string): NormalizeResult {
   const unresolvable = hasUnresolvableSyntax(trimmed);
   if (unresolvable) return { ok: false, reason: 'unresolvable', detail: unresolvable };
 
-  const segments = splitSegments(tokenize(trimmed));
-  if (typeof segments === 'string') {
-    return { ok: false, reason: 'unresolvable', detail: `unsupported operator ${segments}` };
+  const parsed = splitSegments(tokenize(trimmed));
+  if (typeof parsed === 'string') {
+    return { ok: false, reason: 'unresolvable', detail: `unsupported operator ${parsed}` };
+  }
+
+  const { segments, separators } = parsed;
+  if (segments.some(segment => segment[0] === 'cd') && separators.some(separator => separator !== '&&')) {
+    return { ok: false, reason: 'unresolvable', detail: 'cd in a conditional or pipeline' };
   }
 
   const piped = trimmed.includes('|');
@@ -176,6 +183,9 @@ export function normalize(command: string, cwd: string): NormalizeResult {
     const head = segment[0];
     if (typeof head !== 'string') {
       return { ok: false, reason: 'unresolvable', detail: 'command name is a glob' };
+    }
+    if (head.includes('/')) {
+      return { ok: false, reason: 'unresolvable', detail: 'executable path cannot be verified' };
     }
     const program = path.basename(head);
 
@@ -188,6 +198,13 @@ export function normalize(command: string, cwd: string): NormalizeResult {
     if (program === 'cd') {
       const moved = nextCwd(args.operands);
       if (typeof moved !== 'string') return moved;
+      try {
+        if (!fs.statSync(moved).isDirectory()) {
+          return { ok: false, reason: 'unresolvable', detail: 'cd target is not a directory' };
+        }
+      } catch {
+        return { ok: false, reason: 'unresolvable', detail: 'cd target does not exist' };
+      }
       cursor = moved;
       continue;
     }

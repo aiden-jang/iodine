@@ -51,13 +51,17 @@ interface ProgramEntry {
 
 /** The real action is decided by a script or an argument we cannot see, so it can never become a rule. */
 const WRAPPER: ProgramEntry = { capability: RUN, approvable: false };
+const PACKAGE_INSTALL: ProgramEntry = {
+  capability: cap('readsFiles', 'writesFiles', 'network', 'spawnsProcesses'),
+  approvable: false,
+};
 
 const PACKAGE_MANAGER: ProgramEntry = {
   subcommands: {
     ls: { capability: READ },
     view: { capability: NET },
-    install: { capability: NET_WRITE },
-    ci: { capability: NET_WRITE },
+    install: PACKAGE_INSTALL,
+    ci: PACKAGE_INSTALL,
     test: WRAPPER,
     start: WRAPPER,
     run: WRAPPER,

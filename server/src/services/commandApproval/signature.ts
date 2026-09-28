@@ -61,6 +61,12 @@ export function describeCommand(command: string, cwd: string, rootPath: string |
     if (!lookup.approvable) {
       return { ...base, approvable: false, reason: `${cmd.program} runs code defined elsewhere` };
     }
+    if (cmd.program === 'rm' && cmd.flags.includes('--recursive')) {
+      return { ...base, approvable: false, reason: 'recursive deletion can reach unlisted files' };
+    }
+    if (cmd.program === 'git' && lookup.subcommand === 'clean') {
+      return { ...base, approvable: false, reason: 'git clean can delete unlisted files' };
+    }
     if (risk.blocked) {
       return { ...base, approvable: false, reason: `flags score ${risk.weight}, over the limit of ${BLOCK_THRESHOLD}` };
     }

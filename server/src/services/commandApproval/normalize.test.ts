@@ -84,6 +84,19 @@ describe('compound commands', () => {
   it('refuses a cd it cannot resolve', () => {
     expect(normalize('cd - && rm README.md', workspace)).toMatchObject({ ok: false, reason: 'unresolvable' });
   });
+
+  it('refuses a failed cd before a conditional command', () => {
+    expect(normalize('cd missing || rm -rf ../outside', workspace)).toMatchObject({ ok: false, reason: 'unresolvable' });
+  });
+
+  it('refuses a cd before a pipeline or semicolon', () => {
+    expect(normalize('cd . | rm README.md', workspace)).toMatchObject({ ok: false, reason: 'unresolvable' });
+    expect(normalize('cd .; rm README.md', workspace)).toMatchObject({ ok: false, reason: 'unresolvable' });
+  });
+
+  it('refuses a missing cd target even with &&', () => {
+    expect(normalize('cd missing && rm README.md', workspace)).toMatchObject({ ok: false, reason: 'unresolvable' });
+  });
 });
 
 describe('commands that can never become a rule', () => {
@@ -93,6 +106,8 @@ describe('commands that can never become a rule', () => {
     ['a backtick', 'rm -rf `cat target`'],
     ['a redirect', 'echo hi > out.txt'],
     ['user home expansion', 'rm -rf ~root'],
+    ['local executable', './rm -rf src'],
+    ['absolute executable', '/bin/rm -rf src'],
   ] as const;
 
   it.each(unresolvable)('refuses %s', (_label, command) => {

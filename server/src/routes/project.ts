@@ -47,6 +47,10 @@ async function getGitDiff(): Promise<string | null> {
  */
 const NON_PORTABLE_FILES = ['approval-rules.json', 'approval-log.jsonl'];
 
+export function isNonPortableArchiveEntry(entry: string): boolean {
+  return NON_PORTABLE_FILES.includes(path.posix.basename(path.posix.normalize(entry)).toLowerCase());
+}
+
 // GET /api/project/metadata/download
 // Streams a zip of ~/.iodine/<workspace-md5>/ as a downloadable file.
 // Includes git-commit and git-diff files at the root of the zip.
@@ -170,6 +174,10 @@ router.post(
 
       if (hasTraversal) {
         return res.status(400).json({ error: 'Zip file contains unsafe paths (path traversal detected)' });
+      }
+
+      if (entries.some(isNonPortableArchiveEntry)) {
+        return res.status(400).json({ error: 'Zip file contains local approval data' });
       }
 
       await new Promise<void>((resolve, reject) => {

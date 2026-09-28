@@ -305,7 +305,7 @@ The **Editor** menu (visible only when a workspace is open) manages the workspac
 
 The server route is in `server/src/routes/project.ts`, registered at `/api/project` in `server/src/app.ts`. The Editor menu is in `client/src/components/layout/MenuBar.tsx`; "Clear Metadata" shows a custom confirm dialog before deleting.
 
-`approval-rules.json` and `approval-log.jsonl` are deliberately excluded from both directions — dropped from the staging dir before zipping, and passed to `unzip -x` on import. Approvals are granted by the person at the keyboard and must not arrive in a shared bundle.
+`approval-rules.json` and `approval-log.jsonl` are deliberately excluded from both directions: dropped from the staging dir before zipping, and rejected by normalized entry name before import. Approvals are granted by the person at the keyboard and must not arrive in a shared bundle.
 
 ### Agent Runtime
 
@@ -348,11 +348,11 @@ Successful `write_file` and `edit_file` tool blocks show a **Revert** button in 
 
 #### Terminal Command Approval Rules
 
-Approving a terminal command can also save a rule so similar commands stop asking. "Similar" means the same *shape*, never similarity of wording: `rm -rf .build` and `rm -rf ~/` read almost identically, and only resolving the paths separates them.
+Approving a terminal command can also save a rule so similar commands stop asking. "Similar" means the same *shape*, never similarity of wording: `rm -f build.log` and `rm -f ~/build.log` read almost identically, and only resolving the paths separates them.
 
 | File | Role |
 |------|------|
-| `server/src/services/commandApproval/normalize.ts` | Raw command → resolved commands. Splits on `&&`/`;`/`\|`, tracks `cd` across the chain, expands `~`, resolves relative paths, follows symlinks with `realpath`, canonicalises flags. Returns `unresolvable` (still runs, never a rule) or `never-allowed`. |
+| `server/src/services/commandApproval/normalize.ts` | Raw command → resolved commands. Splits on `&&`/`;`/`\|`, tracks `cd` across safe `&&` chains, expands `~`, resolves relative paths, follows symlinks with `realpath`, canonicalises flags. Executables invoked by path, missing `cd` targets, and `cd` chains with other operators never become rules. Returns `unresolvable` (still runs, never a rule) or `never-allowed`. |
 | `server/src/services/commandApproval/capabilities.ts` | Hand-written table of what a program does, keyed on program **plus subcommand** so `git status`, `git push` and `git clean` differ. Unknown program or subcommand yields nothing. |
 | `server/src/services/commandApproval/flags.ts` | Per-program flag weights; `--no-preserve-root` and `find -exec` are blocked outright. |
 | `server/src/services/commandApproval/operands.ts` | Labels each resolved path `inside-project` / `home` / `root` / `system` / `outside` / `glob` / `url`, and decides what an approved folder covers. |
@@ -362,9 +362,9 @@ Approving a terminal command can also save a rule so similar commands stop askin
 | `client/src/components/right/CodingAssistant.tsx` | `CommandApprovalBlock` renders the third button when the server sends a `rememberLabel`. |
 | `client/src/components/layout/MenuBar.tsx` | **Editor → Command Approvals…** lists rules with Remove. |
 
-**Only `inside-project` targets are ever approvable.** Home, root, system, outside, globs and URLs always ask, so `rm -rf ~/` can never become a rule even if the client asks for one. Wrappers whose real work lives elsewhere (`npm run`, `make`, `node`, `find`, `xargs`) are also refused, since the script can change after approval.
+**Only `inside-project` targets are ever approvable.** Home, root, system, outside, globs and URLs always ask. Recursive `rm` and `git clean` never become rules because they can delete descendants not named in the command. Wrappers whose real work lives elsewhere (`npm run`, package installs, `make`, `node`, `find`, `xargs`) are also refused, since the script can change after approval.
 
-A rule is scoped to the deepest folder containing everything the command touched, and never reaches hidden or gitignored files beneath it — though a rule aimed straight at such a folder does work, the same way `.cache` does. Every part of a chained command must be covered or the whole line asks.
+A rule is scoped to the deepest folder containing its named targets. Hidden or gitignored targets beneath that folder do not match, though a rule aimed straight at such a folder does work, the same way `.cache` does. Every part of a chained command must be covered or the whole line asks.
 
 The server re-checks approvability on resolve rather than trusting the client's `remember` flag.
 

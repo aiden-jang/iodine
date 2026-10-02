@@ -51,11 +51,30 @@ describe('what can become a rule', () => {
   it('refuses recursive deletion and git clean', () => {
     expect(only('rm -rf src').approvable).toBe(false);
     expect(only('rm -r src').approvable).toBe(false);
+    expect(only('rm -rfP src').approvable).toBe(false);
     expect(only('git clean -fdx').approvable).toBe(false);
+  });
+
+  it('refuses Git commands whose effects depend on a remote', () => {
+    expect(only('git push origin main').approvable).toBe(false);
+    expect(only('git pull origin main').approvable).toBe(false);
+  });
+
+  it('keeps chmod modes exact and refuses recursive flags', () => {
+    expect(only('chmod 777 src').approvable).toBe(true);
+    expect(sameSignature(only('chmod 777 src').signature, only('chmod 000 src').signature)).toBe(false);
+    expect(only('chmod -R 777 src').approvable).toBe(false);
+  });
+
+  it('refuses flags that hide a write target', () => {
+    expect(only('cp --target-directory=/tmp src/file').approvable).toBe(false);
+    expect(only('mv --target-directory=/tmp src/file').approvable).toBe(false);
+    expect(only('git diff --output=/tmp/diff').approvable).toBe(false);
   });
 
   it('refuses a glob, since we cannot tell what it hits', () => {
     expect(only('rm -rf *').approvable).toBe(false);
+    expect(only('git show *').approvable).toBe(false);
   });
 
   it('refuses a command that cannot be resolved at all', () => {

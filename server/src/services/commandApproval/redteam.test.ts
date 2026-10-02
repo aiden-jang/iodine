@@ -48,10 +48,10 @@ function canBeRemembered(command: string): boolean {
   return parts !== null && parts.length > 0 && parts.every(p => p.approvable);
 }
 
-async function approve(command: string): Promise<void> {
+async function approve(command: string, scope: 'exact' | 'directory' = 'exact'): Promise<void> {
   const parts = describeOrThrow(command);
   if (!parts) throw new Error(`cannot describe ${command}`);
-  for (const part of parts) await saveRule(workspace, part);
+  for (const part of parts) await saveRule(workspace, part, null, scope);
 }
 
 async function runsWithoutAsking(command: string): Promise<boolean> {
@@ -87,6 +87,7 @@ describe('these can never be remembered, whatever the user clicks', () => {
     ['a failed cd before a conditional delete', 'cd missing || rm -f ../outside'],
     ['a package install with lifecycle scripts', 'npm install'],
     ['a recursive project delete', 'rm -rf src'],
+    ['a recursive delete with an extra flag', 'rm -rfP src'],
     ['a git clean that can delete unlisted files', 'git clean -fdx'],
   ])('refuses %s', (_label, command) => {
     expect(canBeRemembered(command)).toBe(false);
@@ -119,7 +120,7 @@ describe('control cases, so a matcher that always says no cannot pass this file'
   });
 
   it('matches a folder beneath the one that was approved', async () => {
-    await approve('ls src');
+    await approve('ls src', 'directory');
     expect(await runsWithoutAsking('ls src/nested/deeper')).toBe(true);
   });
 

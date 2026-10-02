@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
-import { commonAncestor, deleteRule, findMatch, loadRules, saveRule } from './rules';
+import { commonAncestor, deleteRule, findMatch, findSimilarRule, loadRules, saveRule } from './rules';
 import { describeCommand, type CommandPart } from './signature';
 
 let workspace: string;
@@ -85,13 +85,49 @@ describe('matching', () => {
   });
 
   it('matches a file beneath the approved folder', async () => {
-    await saveRule(workspace, parts('ls src')[0]);
+    await saveRule(workspace, parts('ls src')[0], null, 'directory');
     expect(await findMatch(workspace, parts('ls src/deep'))).toHaveLength(1);
+  });
+
+  it('does not extend an exact directory approval to its children', async () => {
+    await saveRule(workspace, parts('ls src')[0]);
+    expect(await findMatch(workspace, parts('ls src'))).toHaveLength(1);
+    expect(await findMatch(workspace, parts('ls src/deep'))).toBeNull();
+  });
+
+  it('treats an older rule without path scopes as exact', async () => {
+    await saveRule(workspace, parts('ls src')[0]);
+    const file = path.join(cacheDir, 'approval-rules.json');
+    const rules = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    delete rules[0].pathScopes;
+    fs.writeFileSync(file, JSON.stringify(rules));
+    expect(await findMatch(workspace, parts('ls src'))).toHaveLength(1);
+    expect(await findMatch(workspace, parts('ls src/deep'))).toBeNull();
   });
 
   it('does not match a sibling folder', async () => {
     await saveRule(workspace, parts('ls src')[0]);
     expect(await findMatch(workspace, parts('ls dist'))).toBeNull();
+  });
+
+  it('keeps a file approval exact even if a child path later appears', async () => {
+    await saveRule(workspace, parts('rm -f src/file')[0]);
+    expect(await findMatch(workspace, parts('rm -f src/file'))).toHaveLength(1);
+    expect(await findMatch(workspace, parts('rm -f src/file/child'))).toBeNull();
+  });
+
+  it('checks each operand of a copy separately', async () => {
+    await saveRule(workspace, parts('cp src/a src/b')[0]);
+    expect(await findMatch(workspace, parts('cp src/a src/b'))).toHaveLength(1);
+    expect(await findMatch(workspace, parts('cp src/a src/c'))).toBeNull();
+    expect(await findMatch(workspace, parts('cp src/b src/a'))).toBeNull();
+  });
+
+  it('lets a newly created directory cover its visible children', async () => {
+    await saveRule(workspace, parts('mkdir src/new')[0], null, 'directory');
+    expect(await findMatch(workspace, parts('mkdir src/new/child'))).toHaveLength(1);
+    expect(await findMatch(workspace, parts('mkdir src/new-sibling'))).toBeNull();
+    expect(await findMatch(workspace, parts('mkdir src/new/.secret'))).toBeNull();
   });
 
   it('does not match once a flag is added', async () => {
@@ -105,12 +141,12 @@ describe('matching', () => {
   });
 
   it('does not match a hidden file inside the approved folder', async () => {
-    await saveRule(workspace, parts('ls src')[0]);
+    await saveRule(workspace, parts('ls src')[0], null, 'directory');
     expect(await findMatch(workspace, parts('ls src/.env'))).toBeNull();
   });
 
   it('does not reach a gitignored folder through an approved parent', async () => {
-    await saveRule(workspace, parts('ls .')[0]);
+    await saveRule(workspace, parts('ls .')[0], null, 'directory');
     expect(await findMatch(workspace, parts('ls dist'))).toBeNull();
   });
 
@@ -127,6 +163,20 @@ describe('matching', () => {
     await saveRule(workspace, parts('ls src')[0]);
     await findMatch(workspace, parts('ls src'));
     expect((await loadRules(workspace))[0].lastUsedAt).not.toBeNull();
+  });
+});
+
+describe('similar approval suggestions', () => {
+  it('stores an embedding and suggests a similar command without matching its rule', async () => {
+    await saveRule(workspace, parts('ls src')[0], [1, 0]);
+    expect(await findMatch(workspace, parts('ls dist'))).toBeNull();
+    expect(await findSimilarRule(workspace, parts('ls dist')[0], [0.99, 0.1])).toMatchObject({ program: 'ls' });
+  });
+
+  it('does not suggest a different program or a distant vector', async () => {
+    await saveRule(workspace, parts('ls src')[0], [1, 0]);
+    expect(await findSimilarRule(workspace, parts('rm -f src/file')[0], [1, 0])).toBeNull();
+    expect(await findSimilarRule(workspace, parts('ls dist')[0], [0, 1])).toBeNull();
   });
 });
 

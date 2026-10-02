@@ -348,7 +348,7 @@ Successful `write_file` and `edit_file` tool blocks show a **Revert** button in 
 
 #### Terminal Command Approval Rules
 
-Approving a terminal command can also save a rule so similar commands stop asking. "Similar" means the same *shape*, never similarity of wording: `rm -f build.log` and `rm -f ~/build.log` read almost identically, and only resolving the paths separates them.
+Approving a terminal command can also save a rule so commands with the same safe shape stop asking. `rm -f build.log` and `rm -f ~/build.log` read almost identically, and only resolving the paths separates them. Embedding similarity can suggest a saved rule in the approval prompt, but it never auto-approves a command.
 
 | File | Role |
 |------|------|
@@ -358,17 +358,22 @@ Approving a terminal command can also save a rule so similar commands stop askin
 | `server/src/services/commandApproval/operands.ts` | Labels each resolved path `inside-project` / `home` / `root` / `system` / `outside` / `glob` / `url`, and decides what an approved folder covers. |
 | `server/src/services/commandApproval/signature.ts` | Ties the above into a `Signature` and decides whether a command can become a rule at all. |
 | `server/src/services/commandApproval/rules.ts` | Stores, matches, and describes rules at `~/.iodine/<workspace-md5>/approval-rules.json`. |
+| `server/src/services/commandApproval/embeddings.ts` | Uses OpenAI embeddings to suggest a saved rule for a similar command. |
 | `server/src/services/terminalCommands.ts` | `requestTerminalApproval` describes the command and checks for a match before prompting; `resolveTerminalApproval(id, approved, remember)` saves the rule. |
 | `client/src/components/right/CodingAssistant.tsx` | `CommandApprovalBlock` renders the third button when the server sends a `rememberLabel`. |
 | `client/src/components/layout/MenuBar.tsx` | **Editor → Command Approvals…** lists rules with Remove. |
 
 **Only `inside-project` targets are ever approvable.** Home, root, system, outside, globs and URLs always ask. Recursive `rm` and `git clean` never become rules because they can delete descendants not named in the command. Wrappers whose real work lives elsewhere (`npm run`, package installs, `make`, `node`, `find`, `xargs`) are also refused, since the script can change after approval.
 
-A rule is scoped to the deepest folder containing its named targets. Hidden or gitignored targets beneath that folder do not match, though a rule aimed straight at such a folder does work, the same way `.cache` does. Every part of a chained command must be covered or the whole line asks.
+Non-path arguments such as a chmod mode or Git revision must match exactly. Git commands whose effects depend on repository state or remote configuration always ask. Unknown `rm` flags also prevent a rule, including mixed clusters such as `-rfP`.
+
+A rule checks every named target separately. The approval prompt offers an exact rule, and for eligible single-directory commands it also offers a rule covering visible children. Hidden or gitignored targets beneath that directory do not match, though a rule aimed straight at such a folder does work, the same way `.cache` does. Every part of a chained command must be covered or the whole line asks. Older saved rules without per-target scopes are treated as exact matches.
 
 The server re-checks approvability on resolve rather than trusting the client's `remember` flag.
 
-**Auto-approval is off unless `IODINE_AUTO_APPROVE=1`.** `autoApproveEnabled()` in `rules.ts` reads that variable on each check rather than at import time, because imports run before `index.ts` loads `.env`. While off, matches are still found and appended to `approval-log.jsonl` with `applied: false`, and the user is asked as usual — read that log on real usage before turning it on. macOS and Linux only; the path logic is POSIX, so Windows never auto-approves.
+If `OPENAI_TOKEN` is configured, saving a single-command rule stores a `text-embedding-3-small` vector for its normalized program, flags, effects, literals, and paths. When a later command is eligible for a rule but has no exact match, the server can send the normalized command to OpenAI and show a similar saved rule in the approval prompt. Vector similarity never approves a command automatically. Without an OpenAI key or when the API is unavailable, command approval continues without suggestions. Manual approvals and rejections are logged locally with normalized command data for later review; the log is not a trained model.
+
+New rules saved through **Always allow** auto-approve matching commands on macOS and Linux. Older rules without an explicit scope remain in review mode unless `IODINE_AUTO_APPROVE=1` is set. `autoApproveEnabled()` in `rules.ts` reads that variable on each check rather than at import time, because imports run before `index.ts` loads `.env`. Matches and their applied status are written to `approval-log.jsonl`. Windows never auto-approves because path logic is POSIX.
 
 `redteam.test.ts` holds the pairs that must never match, plus control cases so a matcher that always says no cannot pass it. A failure there means a command ran without the user being asked, so the file only grows.
 

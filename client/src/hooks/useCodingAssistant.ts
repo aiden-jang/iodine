@@ -186,7 +186,7 @@ export function useCodingAssistant(
     pendingProactiveContextRef.current = collectContext;
   }, []);
 
-  const sendApproval = useCallback(async (id: string, approved: boolean, remember = false) => {
+  const sendApproval = useCallback(async (id: string, approved: boolean, scope?: 'exact' | 'directory') => {
     // Update block status immediately so buttons disappear
     setUiMessages(prev => prev.map(msg => {
       if (msg.role !== 'assistant') return msg;
@@ -203,7 +203,7 @@ export function useCodingAssistant(
       await fetch(`${API_BASE}/api/agent/terminal/approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, approved, remember }),
+        body: JSON.stringify({ id, approved, remember: scope !== undefined, scope }),
       });
     } catch {
       // timeout on server will reject automatically
@@ -624,6 +624,8 @@ export function useCodingAssistant(
               status: payload.autoApproved ? 'approved' : 'pending',
               output: '',
               rememberLabel: (payload.rememberLabel as string | null) ?? null,
+              directoryLabel: (payload.directoryLabel as string | null) ?? null,
+              similarRuleLabel: (payload.similarRuleLabel as string | null) ?? null,
               autoApproved: payload.autoApproved === true,
             };
             updateAssistant(msg => ({ ...msg, blocks: [...msg.blocks, approvalBlock] }));

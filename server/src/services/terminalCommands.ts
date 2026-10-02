@@ -3,8 +3,9 @@ import { randomUUID } from 'crypto';
 import { Response } from 'express';
 import { rootPath } from '../state';
 import type { ToolResult } from './fileTools';
-import { autoApproveEnabled, findMatch, logMatch, ruleLabel, saveRule } from './commandApproval/rules';
+import { autoApproveEnabled, canUseDirectoryScope, findMatch, findSimilarRule, loadRules, logDecision, logMatch, ruleLabel, ruleSummary, saveRule, type ApprovalRule, type RuleScope } from './commandApproval/rules';
 import { describeCommand, type CommandPart } from './commandApproval/signature';
+import { COMMAND_EMBEDDING_FORMAT, COMMAND_EMBEDDING_MODEL, commandEmbeddingInput, embedCommand } from './commandApproval/embeddings';
 
 export interface TerminalCommandRequest {
   id: string;
@@ -16,7 +17,8 @@ export interface TerminalCommandRequest {
 interface PendingCommand extends TerminalCommandRequest {
   createdAt: number;
   resolve: (approved: boolean) => void;
-  /** Null when the command could not be resolved well enough to remember. */
+  workspace: string | null;
+  /** Null when the command could not be resolved. */
   parts: CommandPart[] | null;
 }
 
@@ -28,15 +30,34 @@ const LONG_RUNNING_CAPTURE_MS = 15 * 1000;
 const MAX_CAPTURE_CHARS = 100_000;
 
 /** Describes the command, and reports any saved rule that already covers all of it. */
-async function inspect(command: string): Promise<{ parts: CommandPart[] | null; matched: boolean }> {
-  if (!rootPath) return { parts: null, matched: false };
+async function inspect(command: string, workspace: string | null): Promise<{ parts: CommandPart[] | null; matched: ApprovalRule[] | null; similarRuleLabel: string | null }> {
+  if (!workspace) return { parts: null, matched: null, similarRuleLabel: null };
 
-  const described = describeCommand(command, rootPath, rootPath);
-  if (!described.ok) return { parts: null, matched: false };
+  const described = describeCommand(command, workspace, workspace);
+  if (!described.ok) return { parts: null, matched: null, similarRuleLabel: null };
 
-  const matched = await findMatch(rootPath, described.parts);
-  if (matched) await logMatch(rootPath, command, matched, autoApproveEnabled());
-  return { parts: described.parts, matched: matched !== null };
+  const matched = await findMatch(workspace, described.parts);
+
+  let similarRuleLabel: string | null = null;
+  if (!matched && described.parts.length === 1 && described.parts[0].approvable && process.env.OPENAI_TOKEN) {
+    const rules = await loadRules(workspace);
+    const hasCandidates = rules.some(rule =>
+      rule.program === described.parts[0].signature.program &&
+      rule.subcommand === described.parts[0].signature.subcommand &&
+      rule.embeddingModel === COMMAND_EMBEDDING_MODEL &&
+      rule.embeddingFormat === COMMAND_EMBEDDING_FORMAT,
+    );
+    if (hasCandidates) {
+      try {
+        const embedding = await embedCommand(commandEmbeddingInput(described.parts[0]));
+        const similar = embedding && await findSimilarRule(workspace, described.parts[0], embedding);
+        if (similar) similarRuleLabel = ruleSummary(similar, workspace);
+      } catch {
+        // Suggestions do not affect whether the user can approve a command.
+      }
+    }
+  }
+  return { parts: described.parts, matched, similarRuleLabel };
 }
 
 export async function requestTerminalApproval(
@@ -46,10 +67,12 @@ export async function requestTerminalApproval(
 ): Promise<boolean> {
   const { id } = request;
   const workspace = rootPath;
-  const { parts, matched } = await inspect(request.command);
+  const { parts, matched, similarRuleLabel } = await inspect(request.command, workspace);
   const remembered = parts !== null && parts.every(p => p.approvable);
+  const autoApproved = matched && workspace === rootPath && process.platform !== 'win32' && (autoApproveEnabled() || matched.every(rule => rule.autoApply === true));
+  if (matched && workspace) await logMatch(workspace, request.command, matched, Boolean(autoApproved));
 
-  if (matched && autoApproveEnabled()) {
+  if (autoApproved) {
     res.write(`event: command_approval\ndata: ${JSON.stringify({ id, command: request.command, reason: request.reason, longRunning: request.longRunning, cwd: rootPath, autoApproved: true })}\n\n`);
     return true;
   }
@@ -61,6 +84,9 @@ export async function requestTerminalApproval(
     longRunning: request.longRunning,
     cwd: rootPath,
     rememberLabel: remembered && workspace ? parts.map(p => ruleLabel(p, workspace)).join(', ') : null,
+    directoryLabel: remembered && workspace && parts.length === 1 && canUseDirectoryScope(parts[0])
+      ? ruleLabel(parts[0], workspace, 'directory') : null,
+    similarRuleLabel,
   })}\n\n`);
 
   return new Promise<boolean>((resolve) => {
@@ -74,7 +100,7 @@ export async function requestTerminalApproval(
     };
 
     const timer = setTimeout(() => finish(false), APPROVAL_TIMEOUT_MS);
-    pendingCommands.set(id, { ...request, createdAt: Date.now(), resolve: finish, parts: remembered ? parts : null });
+    pendingCommands.set(id, { ...request, createdAt: Date.now(), resolve: finish, workspace, parts });
 
     const poll = setInterval(() => {
       if (settled) {
@@ -87,17 +113,29 @@ export async function requestTerminalApproval(
   });
 }
 
-export async function resolveTerminalApproval(id: string, approved: boolean, remember = false): Promise<boolean> {
+export async function resolveTerminalApproval(id: string, approved: boolean, remember = false, scope: RuleScope = 'exact'): Promise<boolean> {
   const pending = pendingCommands.get(id);
   if (!pending) return false;
+  if (pending.workspace !== rootPath) {
+    pending.resolve(false);
+    return true;
+  }
 
-  if (approved && remember && pending.parts && rootPath) {
+  let savedScope: RuleScope | null = null;
+  if (approved && remember && pending.parts?.every(part => part.approvable) && pending.workspace) {
     try {
-      for (const part of pending.parts) await saveRule(rootPath, part);
+      let embedding: number[] | null = null;
+      if (pending.parts.length === 1) {
+        try { embedding = await embedCommand(commandEmbeddingInput(pending.parts[0])); } catch { /* the rule still works without a suggestion vector */ }
+      }
+      for (const part of pending.parts) await saveRule(pending.workspace, part, embedding, scope);
+      savedScope = scope;
     } catch {
       // Failing to remember must never cost the user the approval they just gave.
     }
   }
+
+  if (pending.workspace) await logDecision(pending.workspace, pending.command, pending.parts, approved, savedScope);
 
   pending.resolve(approved);
   return true;

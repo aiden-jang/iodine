@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { Response } from 'express';
 import { rootPath } from '../state';
 import type { ToolResult } from './fileTools';
-import { autoApproveEnabled, canUseDirectoryScope, findMatch, findSimilarRule, loadRules, logDecision, logMatch, ruleLabel, ruleSummary, saveRule, type ApprovalRule, type RuleScope } from './commandApproval/rules';
+import { autoApproveEnabled, canUseDirectoryScope, findMatch, findSimilarRule, loadRules, logDecision, logMatch, ruleLabel, ruleSummary, saveRule, updateRuleEmbedding, type ApprovalRule, type RuleScope } from './commandApproval/rules';
 import { describeCommand, type CommandPart } from './commandApproval/signature';
 import { COMMAND_EMBEDDING_FORMAT, COMMAND_EMBEDDING_MODEL, commandEmbeddingInput, embedCommand } from './commandApproval/embeddings';
 
@@ -39,7 +39,7 @@ async function inspect(command: string, workspace: string | null): Promise<{ par
   const matched = await findMatch(workspace, described.parts);
 
   let similarRuleLabel: string | null = null;
-  if (!matched && described.parts.length === 1 && described.parts[0].approvable && process.env.OPENAI_TOKEN) {
+  if (!matched && described.parts.length === 1 && described.parts[0].approvable) {
     const rules = await loadRules(workspace);
     const hasCandidates = rules.some(rule =>
       rule.program === described.parts[0].signature.program &&
@@ -50,7 +50,7 @@ async function inspect(command: string, workspace: string | null): Promise<{ par
     if (hasCandidates) {
       try {
         const embedding = await embedCommand(commandEmbeddingInput(described.parts[0]));
-        const similar = embedding && await findSimilarRule(workspace, described.parts[0], embedding);
+        const similar = await findSimilarRule(workspace, described.parts[0], embedding);
         if (similar) similarRuleLabel = ruleSummary(similar, workspace);
       } catch {
         // Suggestions do not affect whether the user can approve a command.
@@ -122,13 +122,13 @@ export async function resolveTerminalApproval(id: string, approved: boolean, rem
   }
 
   let savedScope: RuleScope | null = null;
+  let savedRuleId: string | null = null;
   if (approved && remember && pending.parts?.every(part => part.approvable) && pending.workspace) {
     try {
-      let embedding: number[] | null = null;
-      if (pending.parts.length === 1) {
-        try { embedding = await embedCommand(commandEmbeddingInput(pending.parts[0])); } catch { /* the rule still works without a suggestion vector */ }
+      for (const part of pending.parts) {
+        const rule = await saveRule(pending.workspace, part, null, scope);
+        if (pending.parts.length === 1) savedRuleId = rule.id;
       }
-      for (const part of pending.parts) await saveRule(pending.workspace, part, embedding, scope);
       savedScope = scope;
     } catch {
       // Failing to remember must never cost the user the approval they just gave.
@@ -138,6 +138,12 @@ export async function resolveTerminalApproval(id: string, approved: boolean, rem
   if (pending.workspace) await logDecision(pending.workspace, pending.command, pending.parts, approved, savedScope);
 
   pending.resolve(approved);
+  if (savedRuleId && pending.workspace && pending.parts) {
+    const workspace = pending.workspace;
+    const ruleId = savedRuleId;
+    const input = commandEmbeddingInput(pending.parts[0]);
+    void embedCommand(input).then(embedding => updateRuleEmbedding(workspace, ruleId, embedding)).catch(() => {});
+  }
   return true;
 }
 

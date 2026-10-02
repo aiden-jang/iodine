@@ -1042,7 +1042,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
           <div style={{ background: 'var(--color-bg-sidebar)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '20px 24px', width: 460, maxHeight: '70vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 6 }}>Command Approvals</div>
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
-              Commands you chose to stop being asked about in this project. Removing one means you will be asked again. With an OpenAI key, command text is sent to OpenAI for similarity suggestions.
+              Commands you chose to stop being asked about in this project. Removing one means you will be asked again. Similarity suggestions use a model downloaded once and run locally.
             </div>
             {approvalError && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 10 }}>{approvalError}</div>}
             {approvalRules.length === 0 && !approvalError && (

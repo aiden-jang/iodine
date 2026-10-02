@@ -9,6 +9,20 @@ import { sameSignature, type CommandPart, type Signature } from './signature';
 import { COMMAND_EMBEDDING_FORMAT, COMMAND_EMBEDDING_MODEL, commandEmbeddingInput, cosineSimilarity } from './embeddings';
 
 const execFileAsync = promisify(execFile);
+const ruleMutations = new Map<string, Promise<void>>();
+
+async function withRuleMutation<T>(workspacePath: string, mutate: () => Promise<T>): Promise<T> {
+  const previous = ruleMutations.get(workspacePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  ruleMutations.set(workspacePath, current);
+  await previous;
+  try { return await mutate(); }
+  finally {
+    release();
+    if (ruleMutations.get(workspacePath) === current) ruleMutations.delete(workspacePath);
+  }
+}
 
 /**
  * Rollout switch, off unless asked for. While off, matches are still found and written to
@@ -95,9 +109,21 @@ export async function saveRule(workspacePath: string, part: CommandPart, embeddi
     lastUsedAt: null,
     ...(embedding ? { embedding, embeddingModel: COMMAND_EMBEDDING_MODEL, embeddingFormat: COMMAND_EMBEDDING_FORMAT } : {}),
   };
-  const rules = await loadRules(workspacePath);
-  await writeRules(workspacePath, [...rules, rule]);
+  await withRuleMutation(workspacePath, async () => {
+    const rules = await loadRules(workspacePath);
+    await writeRules(workspacePath, [...rules, rule]);
+  });
   return rule;
+}
+
+export async function updateRuleEmbedding(workspacePath: string, id: string, embedding: number[]): Promise<void> {
+  await withRuleMutation(workspacePath, async () => {
+    const rules = await loadRules(workspacePath);
+    if (!rules.some(rule => rule.id === id)) return;
+    await writeRules(workspacePath, rules.map(rule => rule.id === id
+      ? { ...rule, embedding, embeddingModel: COMMAND_EMBEDDING_MODEL, embeddingFormat: COMMAND_EMBEDDING_FORMAT }
+      : rule));
+  });
 }
 
 export async function findSimilarRule(
@@ -122,11 +148,13 @@ export async function findSimilarRule(
 }
 
 export async function deleteRule(workspacePath: string, id: string): Promise<boolean> {
-  const rules = await loadRules(workspacePath);
-  const remaining = rules.filter(r => r.id !== id);
-  if (remaining.length === rules.length) return false;
-  await writeRules(workspacePath, remaining);
-  return true;
+  return withRuleMutation(workspacePath, async () => {
+    const rules = await loadRules(workspacePath);
+    const remaining = rules.filter(r => r.id !== id);
+    if (remaining.length === rules.length) return false;
+    await writeRules(workspacePath, remaining);
+    return true;
+  });
 }
 
 async function isGitIgnored(workspacePath: string, target: string): Promise<boolean> {
@@ -159,26 +187,28 @@ async function ruleReaches(workspacePath: string, rule: ApprovalRule, part: Comm
 export async function findMatch(workspacePath: string, parts: CommandPart[]): Promise<ApprovalRule[] | null> {
   if (parts.length === 0 || parts.some(p => !p.approvable)) return null;
 
-  const rules = await loadRules(workspacePath);
-  if (rules.length === 0) return null;
+  return withRuleMutation(workspacePath, async () => {
+    const rules = await loadRules(workspacePath);
+    if (rules.length === 0) return null;
 
-  const matched: ApprovalRule[] = [];
-  for (const part of parts) {
-    let hit: ApprovalRule | undefined;
-    for (const rule of rules) {
-      if (await ruleReaches(workspacePath, rule, part)) {
-        hit = rule;
-        break;
+    const matched: ApprovalRule[] = [];
+    for (const part of parts) {
+      let hit: ApprovalRule | undefined;
+      for (const rule of rules) {
+        if (await ruleReaches(workspacePath, rule, part)) {
+          hit = rule;
+          break;
+        }
       }
+      if (!hit) return null;
+      matched.push(hit);
     }
-    if (!hit) return null;
-    matched.push(hit);
-  }
 
-  const usedAt = Date.now();
-  const ids = new Set(matched.map(r => r.id));
-  await writeRules(workspacePath, rules.map(r => (ids.has(r.id) ? { ...r, lastUsedAt: usedAt } : r)));
-  return matched;
+    const usedAt = Date.now();
+    const ids = new Set(matched.map(r => r.id));
+    await writeRules(workspacePath, rules.map(r => (ids.has(r.id) ? { ...r, lastUsedAt: usedAt } : r)));
+    return matched;
+  });
 }
 
 export async function logMatch(

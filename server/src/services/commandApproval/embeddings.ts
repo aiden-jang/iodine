@@ -1,30 +1,32 @@
-import OpenAI from 'openai';
+import os from 'os';
+import path from 'path';
 import type { CommandPart } from './signature';
 
-export const COMMAND_EMBEDDING_MODEL = 'text-embedding-3-small';
-export const COMMAND_EMBEDDING_FORMAT = 'normalized-v1';
+export const COMMAND_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2:q8';
+export const COMMAND_EMBEDDING_FORMAT = 'normalized-v2';
+
+async function createExtractor() {
+  const { env, pipeline } = await import('@huggingface/transformers');
+  env.cacheDir = path.join(os.homedir(), '.iodine', 'models');
+  return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { dtype: 'q8' });
+}
+
+let extractorPromise: ReturnType<typeof createExtractor> | null = null;
 
 export function commandEmbeddingInput(part: CommandPart): string {
   const { signature, paths } = part;
-  return [
-    `program: ${signature.program}`,
-    `subcommand: ${signature.subcommand ?? 'none'}`,
-    `flags: ${signature.flags.join(' ') || 'none'}`,
-    `effects: ${Object.entries(signature.capability).filter(([, enabled]) => enabled).map(([effect]) => effect).join(' ') || 'none'}`,
-    `literal arguments: ${signature.literalOperands.join(' ') || 'none'}`,
-    `paths: ${paths.join(' ') || 'none'}`,
-  ].join('\n');
+  return [signature.program, signature.subcommand, ...signature.flags, ...signature.literalOperands, ...paths]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
 }
 
-export async function embedCommand(command: string): Promise<number[] | null> {
-  const apiKey = process.env.OPENAI_TOKEN;
-  if (!apiKey) return null;
-
-  const response = await new OpenAI({ apiKey, timeout: 5_000, maxRetries: 0 }).embeddings.create({
-    model: COMMAND_EMBEDDING_MODEL,
-    input: command,
-  });
-  return response.data[0]?.embedding ?? null;
+export async function embedCommand(command: string): Promise<number[]> {
+  const extractor = await (extractorPromise ??= createExtractor().catch(error => {
+    extractorPromise = null;
+    throw error;
+  }));
+  const output = await extractor(command, { pooling: 'mean', normalize: true });
+  return Array.from(output.data);
 }
 
 export function cosineSimilarity(left: number[], right: number[]): number {

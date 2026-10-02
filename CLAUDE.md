@@ -358,7 +358,7 @@ Approving a terminal command can also save a rule so commands with the same safe
 | `server/src/services/commandApproval/operands.ts` | Labels each resolved path `inside-project` / `home` / `root` / `system` / `outside` / `glob` / `url`, and decides what an approved folder covers. |
 | `server/src/services/commandApproval/signature.ts` | Ties the above into a `Signature` and decides whether a command can become a rule at all. |
 | `server/src/services/commandApproval/rules.ts` | Stores, matches, and describes rules at `~/.iodine/<workspace-md5>/approval-rules.json`. |
-| `server/src/services/commandApproval/embeddings.ts` | Uses OpenAI embeddings to suggest a saved rule for a similar command. |
+| `server/src/services/commandApproval/embeddings.ts` | Runs a cached local model to suggest a saved rule for a similar command. |
 | `server/src/services/terminalCommands.ts` | `requestTerminalApproval` describes the command and checks for a match before prompting; `resolveTerminalApproval(id, approved, remember)` saves the rule. |
 | `client/src/components/right/CodingAssistant.tsx` | `CommandApprovalBlock` renders the third button when the server sends a `rememberLabel`. |
 | `client/src/components/layout/MenuBar.tsx` | **Editor → Command Approvals…** lists rules with Remove. |
@@ -371,7 +371,7 @@ A rule checks every named target separately. The approval prompt offers an exact
 
 The server re-checks approvability on resolve rather than trusting the client's `remember` flag.
 
-If `OPENAI_TOKEN` is configured, saving a single-command rule stores a `text-embedding-3-small` vector for its normalized program, flags, effects, literals, and paths. When a later command is eligible for a rule but has no exact match, the server can send the normalized command to OpenAI and show a similar saved rule in the approval prompt. Vector similarity never approves a command automatically. Without an OpenAI key or when the API is unavailable, command approval continues without suggestions. Manual approvals and rejections are logged locally with normalized command data for later review; the log is not a trained model.
+Saving a single-command rule starts a local `all-MiniLM-L6-v2` embedding of its normalized command text. The model downloads once from Hugging Face and is cached under `~/.iodine/models`; no API key or command upload is needed. The approval takes effect while the model loads. When a later command is eligible for a rule but has no exact match, the local model can show a similar saved rule in the approval prompt. Vector similarity never approves a command automatically. If the model is unavailable, command approval continues without suggestions. Manual approvals and rejections are logged locally with normalized command data for later review; the log is not a trained model.
 
 New rules saved through **Always allow** auto-approve matching commands on macOS and Linux. Older rules without an explicit scope remain in review mode unless `IODINE_AUTO_APPROVE=1` is set. `autoApproveEnabled()` in `rules.ts` reads that variable on each check rather than at import time, because imports run before `index.ts` loads `.env`. Matches and their applied status are written to `approval-log.jsonl`. Windows never auto-approves because path logic is POSIX.
 

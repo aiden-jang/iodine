@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
-import { commonAncestor, deleteRule, findMatch, findSimilarRule, loadRules, saveRule } from './rules';
+import { commonAncestor, deleteRule, findMatch, findSimilarRule, loadRules, saveRule, updateRuleEmbedding } from './rules';
 import { describeCommand, type CommandPart } from './signature';
 
 let workspace: string;
@@ -75,6 +75,17 @@ describe('saving and loading', () => {
     await fs.promises.mkdir(cacheDir, { recursive: true });
     await fs.promises.writeFile(path.join(cacheDir, 'approval-rules.json'), '{not json', 'utf-8');
     expect(await loadRules(workspace)).toEqual([]);
+  });
+
+  it('keeps a new rule when an older rule receives its embedding', async () => {
+    const first = await saveRule(workspace, parts('ls src')[0]);
+    await Promise.all([
+      updateRuleEmbedding(workspace, first.id, [1, 0]),
+      saveRule(workspace, parts('ls dist')[0]),
+    ]);
+    const rules = await loadRules(workspace);
+    expect(rules).toHaveLength(2);
+    expect(rules.find(rule => rule.id === first.id)?.embedding).toEqual([1, 0]);
   });
 });
 

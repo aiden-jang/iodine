@@ -48,10 +48,13 @@ describe('similar approval flow', () => {
     expect((await loadRules(workspace)).at(-1)?.pathScopes).toEqual([
       { path: path.join(workspace, 'src/new'), descendants: true },
     ]);
+    await vi.waitFor(async () => {
+      expect((await loadRules(workspace)).at(-1)?.embedding).toEqual([0.99, 0.1]);
+    });
     const logPath = path.join(os.homedir(), '.iodine', crypto.createHash('md5').update(workspace).digest('hex'), 'approval-log.jsonl');
     const decisions = fs.readFileSync(logPath, 'utf-8').trim().split('\n').map(line => JSON.parse(line));
     expect(decisions).toContainEqual(expect.objectContaining({ event: 'manual-decision', approved: true, savedScope: 'directory' }));
-    expect(decisions.at(-1).normalized[0]).toContain('program: mkdir');
+    expect(decisions.at(-1).normalized[0]).toContain('mkdir ');
     const child = describeCommand('mkdir src/new/child', workspace, workspace);
     if (!child.ok) throw new Error(child.reason);
     expect(await findMatch(workspace, child.parts)).toHaveLength(1);
@@ -79,7 +82,7 @@ describe('similar approval flow', () => {
 
     const originalKey = process.env.OPENAI_TOKEN;
     const originalAutoApprove = process.env.IODINE_AUTO_APPROVE;
-    process.env.OPENAI_TOKEN = 'test-key';
+    delete process.env.OPENAI_TOKEN;
     process.env.IODINE_AUTO_APPROVE = '1';
     try {
       const writes: string[] = [];

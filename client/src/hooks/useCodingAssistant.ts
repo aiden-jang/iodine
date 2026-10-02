@@ -252,7 +252,7 @@ export function useCodingAssistant(
     setAcknowledgeStatus('pending', 'done', msgId);
   }, [setAcknowledgeStatus]);
 
-  const sendApproval = useCallback(async (id: string, approved: boolean, scope?: 'exact' | 'directory') => {
+  const sendApproval = useCallback(async (id: string, approved: boolean, scope?: 'exact' | 'directory' | 'similar') => {
     // Update block status immediately so buttons disappear
     setUiMessages(prev => prev.map(msg => {
       if (msg.role !== 'assistant') return msg;
@@ -696,8 +696,10 @@ export function useCodingAssistant(
               output: '',
               rememberLabel: (payload.rememberLabel as string | null) ?? null,
               directoryLabel: (payload.directoryLabel as string | null) ?? null,
+              similarLabel: (payload.similarLabel as string | null) ?? null,
               similarRuleLabel: (payload.similarRuleLabel as string | null) ?? null,
               autoApproved: payload.autoApproved === true,
+              autoApprovalReason: (payload.autoApprovalReason as string | null) ?? null,
             };
             updateAssistant(msg => ({ ...msg, blocks: [...msg.blocks, approvalBlock] }));
           } else if (eventName === 'command_output') {

@@ -45,10 +45,11 @@ export interface ApprovalRule extends Signature {
   embedding?: number[];
   embeddingModel?: string;
   embeddingFormat?: string;
+  similar?: boolean;
   autoApply?: boolean;
 }
 
-export type RuleScope = 'exact' | 'directory';
+export type RuleScope = 'exact' | 'directory' | 'similar';
 
 export function canUseDirectoryScope(part: CommandPart): boolean {
   if (!part.approvable || part.paths.length !== 1) return false;
@@ -96,14 +97,15 @@ export function commonAncestor(paths: string[]): string | null {
 
 export async function saveRule(workspacePath: string, part: CommandPart, embedding?: number[] | null, scope: RuleScope = 'exact'): Promise<ApprovalRule> {
   if (!part.approvable) throw new Error(part.reason ?? 'command cannot be approved');
-  if (scope === 'directory' && !canUseDirectoryScope(part)) throw new Error('directory scope is unavailable for this command');
+  if ((scope === 'directory' || scope === 'similar') && !canUseDirectoryScope(part)) throw new Error('directory scope is unavailable for this command');
 
-  const pathScopes = part.paths.map(target => ({ path: target, descendants: scope === 'directory' }));
+  const pathScopes = part.paths.map(target => ({ path: target, descendants: scope !== 'exact' }));
   const rule: ApprovalRule = {
     ...part.signature,
     id: crypto.randomUUID(),
     pathPrefix: commonAncestor(part.paths),
     pathScopes,
+    ...(scope === 'similar' ? { similar: true } : {}),
     autoApply: true,
     createdAt: Date.now(),
     lastUsedAt: null,
@@ -169,6 +171,10 @@ async function isGitIgnored(workspacePath: string, target: string): Promise<bool
 
 async function ruleReaches(workspacePath: string, rule: ApprovalRule, part: CommandPart): Promise<boolean> {
   if (!sameSignature(rule, part.signature)) return false;
+  return ruleCoversPaths(workspacePath, rule, part);
+}
+
+async function ruleCoversPaths(workspacePath: string, rule: ApprovalRule, part: CommandPart): Promise<boolean> {
   const scopes = rule.pathScopes ?? (rule.pathPrefix === null ? [] : [{ path: rule.pathPrefix, descendants: false }]);
   if (scopes.length !== part.paths.length) return false;
 
@@ -195,6 +201,7 @@ export async function findMatch(workspacePath: string, parts: CommandPart[]): Pr
     for (const part of parts) {
       let hit: ApprovalRule | undefined;
       for (const rule of rules) {
+        if (rule.similar) continue;
         if (await ruleReaches(workspacePath, rule, part)) {
           hit = rule;
           break;
@@ -208,6 +215,35 @@ export async function findMatch(workspacePath: string, parts: CommandPart[]): Pr
     const ids = new Set(matched.map(r => r.id));
     await writeRules(workspacePath, rules.map(r => (ids.has(r.id) ? { ...r, lastUsedAt: usedAt } : r)));
     return matched;
+  });
+}
+
+export async function findSimilarMatch(
+  workspacePath: string,
+  part: CommandPart,
+  embedding: number[],
+): Promise<ApprovalRule | null> {
+  if (!part.approvable) return null;
+
+  return withRuleMutation(workspacePath, async () => {
+    const rules = await loadRules(workspacePath);
+    let best: ApprovalRule | null = null;
+    let bestScore = 0.84;
+    for (const rule of rules) {
+      if (!rule.similar || !sameSignature(rule, part.signature)) continue;
+      if (rule.embeddingModel !== COMMAND_EMBEDDING_MODEL || rule.embeddingFormat !== COMMAND_EMBEDDING_FORMAT || !Array.isArray(rule.embedding)) continue;
+      if (!await ruleCoversPaths(workspacePath, rule, part)) continue;
+      const score = cosineSimilarity(rule.embedding, embedding);
+      if (score > bestScore) {
+        best = rule;
+        bestScore = score;
+      }
+    }
+    if (!best) return null;
+
+    const usedAt = Date.now();
+    await writeRules(workspacePath, rules.map(rule => rule.id === best!.id ? { ...rule, lastUsedAt: usedAt } : rule));
+    return best;
   });
 }
 
@@ -256,19 +292,19 @@ export async function logDecision(
   }
 }
 
-function label(signature: Signature, scopes: Array<{ path: string; descendants: boolean }>, workspacePath: string): string {
+function label(signature: Signature, scopes: Array<{ path: string; descendants: boolean }>, workspacePath: string, prefix = 'same'): string {
   const head = [signature.program, signature.subcommand, ...signature.flags, ...(signature.literalOperands ?? [])].filter(Boolean).join(' ');
-  if (scopes.length === 0) return `same ${head}`;
+  if (scopes.length === 0) return `${prefix} ${head}`;
   const targets = scopes.map(scope => {
     const relative = path.relative(workspacePath, scope.path) || 'this project';
     return scope.descendants ? `${relative} and its visible children` : relative;
   });
-  return `same ${head} for ${targets.join(' and ')}`;
+  return `${prefix} ${head} for ${targets.join(' and ')}`;
 }
 
 /** Plain-language description of what approving this command would allow, for the button. */
 export function ruleLabel(part: CommandPart, workspacePath: string, scope: RuleScope = 'exact'): string {
-  return label(part.signature, part.paths.map(target => ({ path: target, descendants: scope === 'directory' })), workspacePath);
+  return label(part.signature, part.paths.map(target => ({ path: target, descendants: scope !== 'exact' })), workspacePath, scope === 'similar' ? 'similar' : 'same');
 }
 
 export function ruleSummary(rule: ApprovalRule, workspacePath: string): string {

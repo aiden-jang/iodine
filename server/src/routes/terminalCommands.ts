@@ -8,8 +8,8 @@ router.post('/agent/terminal/approval', async (req, res) => {
   if (!id || typeof approved !== 'boolean') {
     return res.status(400).json({ error: 'id and approved are required' });
   }
-  if (scope !== undefined && scope !== 'exact' && scope !== 'directory') {
-    return res.status(400).json({ error: 'scope must be exact or directory' });
+  if (scope !== undefined && scope !== 'exact' && scope !== 'directory' && scope !== 'similar') {
+    return res.status(400).json({ error: 'scope must be exact, directory, or similar' });
   }
 
   if (!await resolveTerminalApproval(id, approved, remember === true, scope)) {

@@ -106,6 +106,46 @@ describe('similar approval flow', () => {
     }
   });
 
+  it('auto-applies a similar rule only inside its approved folder with matching flags', async () => {
+    const described = describeCommand('mkdir src/similar', workspace, workspace);
+    if (!described.ok) throw new Error(described.reason);
+    await saveRule(workspace, described.parts[0], [1, 0], 'similar');
+
+    const matchingWrites: string[] = [];
+    const matchingResponse = { write: (chunk: string) => matchingWrites.push(chunk) } as unknown as Response;
+    expect(await requestTerminalApproval(
+      { id: 'similar-child', command: 'mkdir src/similar/child', reason: 'create child', longRunning: false },
+      matchingResponse,
+      { aborted: false },
+    )).toBe(true);
+    expect(matchingWrites[0]).toContain('autoApproved');
+    expect(matchingWrites[0]).toContain('autoApprovalReason');
+
+    const hiddenWrites: string[] = [];
+    const hiddenResponse = { write: (chunk: string) => hiddenWrites.push(chunk) } as unknown as Response;
+    const hiddenApproval = requestTerminalApproval(
+      { id: 'similar-hidden', command: 'mkdir src/similar/.hidden', reason: 'create hidden folder', longRunning: false },
+      hiddenResponse,
+      { aborted: false },
+    );
+    await vi.waitFor(() => expect(hiddenWrites).toHaveLength(1));
+    expect(hiddenWrites[0]).not.toContain('autoApproved');
+    await resolveTerminalApproval('similar-hidden', false);
+    expect(await hiddenApproval).toBe(false);
+
+    const flaggedWrites: string[] = [];
+    const flaggedResponse = { write: (chunk: string) => flaggedWrites.push(chunk) } as unknown as Response;
+    const flaggedApproval = requestTerminalApproval(
+      { id: 'similar-flagged', command: 'mkdir -p src/similar/flagged', reason: 'create folder', longRunning: false },
+      flaggedResponse,
+      { aborted: false },
+    );
+    await vi.waitFor(() => expect(flaggedWrites).toHaveLength(1));
+    expect(flaggedWrites[0]).not.toContain('autoApproved');
+    await resolveTerminalApproval('similar-flagged', false);
+    expect(await flaggedApproval).toBe(false);
+  });
+
   it('automatically applies a newly saved rule without a rollout flag', async () => {
     const described = describeCommand('ls src', workspace, workspace);
     if (!described.ok) throw new Error(described.reason);

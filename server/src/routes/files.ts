@@ -137,6 +137,33 @@ const IMAGE_MIME: Record<string, string> = {
 
 const router = Router();
 
+export interface DirectoryBrowserResult {
+  path: string;
+  parentPath: string | null;
+  directories: Array<{ name: string; path: string }>;
+}
+
+export async function listDirectories(directoryPath: string, rootPath: string): Promise<DirectoryBrowserResult> {
+  const realRoot = await fs.promises.realpath(rootPath);
+  const realPath = await fs.promises.realpath(directoryPath);
+  const relativePath = path.relative(realRoot, realPath);
+  if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    throw Object.assign(new Error('Path outside the folder browser'), { code: 'OUTSIDE_ROOT' });
+  }
+
+  const entries = await fs.promises.readdir(realPath, { withFileTypes: true });
+  const directories = entries
+    .filter(entry => entry.isDirectory())
+    .map(entry => ({ name: entry.name, path: path.join(realPath, entry.name) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return {
+    path: realPath,
+    parentPath: realPath === realRoot ? null : path.dirname(realPath),
+    directories,
+  };
+}
+
 router.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -161,6 +188,21 @@ router.post('/workspace/open', async (req, res) => {
 router.post('/workspace/close', (_req, res) => {
   clearRootPath();
   return res.json({ ok: true });
+});
+
+router.get('/workspace/directories', async (req, res) => {
+  const browserRoot = path.parse(os.homedir()).root;
+  const requestedPath = typeof req.query.path === 'string' ? req.query.path : browserRoot;
+  try {
+    return res.json(await listDirectories(requestedPath, browserRoot));
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error.code === 'OUTSIDE_ROOT') return res.status(400).json({ error: 'Folder is outside the browser root' });
+    if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'ENOTDIR') {
+      return res.status(400).json({ error: 'Folder does not exist or is not accessible' });
+    }
+    return res.status(500).json({ error: 'Failed to list folders' });
+  }
 });
 
 router.post('/workspace/find', async (req, res) => {

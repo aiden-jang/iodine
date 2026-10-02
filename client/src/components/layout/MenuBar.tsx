@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { findWorkspace, openWorkspace, downloadProjectMetadata, importProjectMetadata, clearProjectMetadata, searchFiles } from '../../api/files';
+import { browseWorkspaceDirectories, openWorkspace, downloadProjectMetadata, importProjectMetadata, clearProjectMetadata, searchFiles, type DirectoryBrowserResult } from '../../api/files';
 import type { Theme } from '../../hooks/useTheme';
 import type { UpdateInfo } from '../../hooks/useUpdateCheck';
 
@@ -79,12 +79,13 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
   const [editorMenuOpen, setEditorMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
-  const [showFallback, setShowFallback] = useState(false);
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [showCloseAllDialog, setShowCloseAllDialog] = useState(false);
   const [showAboutDialog, setShowAboutDialog] = useState(false);
-  const [pathInput, setPathInput] = useState('');
   const [opening, setOpening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [folderBrowser, setFolderBrowser] = useState<DirectoryBrowserResult | null>(null);
+  const [folderBrowserLoading, setFolderBrowserLoading] = useState(false);
+  const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<{ type: 'downloading' | 'importing' | 'clearing' | 'success' | 'error'; message: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
@@ -95,7 +96,6 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [fileResultIndex, setFileResultIndex] = useState(-1);
   const [fileSearching, setFileSearching] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,74 +158,45 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
     setFileSearching(false);
   }, []);
 
+  const loadFolderBrowser = useCallback(async (path?: string) => {
+    setFolderBrowserLoading(true);
+    setFolderBrowserError(null);
+    try {
+      setFolderBrowser(await browseWorkspaceDirectories(path));
+    } catch (err) {
+      setFolderBrowserError(err instanceof Error ? err.message : 'Failed to list folders');
+    } finally {
+      setFolderBrowserLoading(false);
+    }
+  }, []);
+
   const handleOpenProjectClick = () => {
     setProjectMenuOpen(false);
-    fileInputRef.current?.click();
+    setShowFolderBrowser(true);
+    void loadFolderBrowser();
   };
 
-  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    // Extract root folder name from the first file's relative path
-    const firstRelative = (files[0] as File & { webkitRelativePath: string }).webkitRelativePath;
-    const folderName = firstRelative.split('/')[0];
-
-    // Reset input so the same folder can be re-selected
-    e.target.value = '';
-
-    setOpening(true);
-    setError(null);
-    setShowFallback(false);
-
-    try {
-      const found = await findWorkspace(folderName);
-      if (found.path) {
-        const result = await openWorkspace(found.path);
-        if (result.path) {
-          onOpenProject(result.path);
-          return;
-        }
-      }
-    } catch {
-      // fall through to manual input
-    } finally {
-      setOpening(false);
-    }
-
-    // Server couldn't locate the folder — show manual path input as fallback
-    setPathInput(folderName);
-    setShowFallback(true);
+  const closeFolderBrowser = () => {
+    setShowFolderBrowser(false);
+    setFolderBrowser(null);
+    setFolderBrowserError(null);
   };
 
-  const handleFallbackSubmit = async () => {
-    const p = pathInput.trim();
-    if (!p || opening) return;
+  const handleOpenFolder = async () => {
+    if (!folderBrowser || opening) return;
     setOpening(true);
-    setError(null);
+    setFolderBrowserError(null);
     try {
-      const result = await openWorkspace(p);
+      const result = await openWorkspace(folderBrowser.path);
       if (result.path) {
         onOpenProject(result.path);
-        setShowFallback(false);
-        setPathInput('');
+        closeFolderBrowser();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open folder');
+      setFolderBrowserError(err instanceof Error ? err.message : 'Failed to open folder');
     } finally {
       setOpening(false);
     }
-  };
-
-  const handleFallbackKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleFallbackSubmit();
-    if (e.key === 'Escape') { setShowFallback(false); setPathInput(''); setError(null); }
-  };
-
-  const closeFallback = () => {
-    setShowFallback(false);
-    setPathInput('');
-    setError(null);
   };
 
   const handleDownloadMetadata = async () => {
@@ -304,16 +275,6 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
 
   return (
     <>
-      {/* Hidden directory picker */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        // @ts-expect-error — webkitdirectory is not in React's types but works in all modern browsers
-        webkitdirectory=""
-        style={{ display: 'none' }}
-        onChange={handleFileInputChange}
-      />
-
       {/* Hidden zip import picker */}
       <input
         ref={importInputRef}
@@ -781,8 +742,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
         </div>
       </div>
 
-      {/* Fallback: manual path input shown when auto-detect fails */}
-      {showFallback && (
+      {showFolderBrowser && (
         <div
           style={{
             position: 'fixed',
@@ -793,7 +753,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
             justifyContent: 'center',
             background: 'rgba(0,0,0,0.5)',
           }}
-          onClick={e => { if (e.target === e.currentTarget) closeFallback(); }}
+          onClick={e => { if (e.target === e.currentTarget) closeFolderBrowser(); }}
         >
           <div
             style={{
@@ -801,7 +761,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
               border: '1px solid var(--color-border)',
               borderRadius: 6,
               padding: '20px 24px',
-              width: 420,
+              width: 460,
               boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
             }}
           >
@@ -809,34 +769,21 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
               Open Project
             </div>
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
-              Could not locate <strong style={{ color: 'var(--color-text-primary)' }}>{pathInput.split('/').pop() || pathInput}</strong> automatically.
-              Enter the absolute path:
+              Choose a folder to open.
             </div>
-            <input
-              autoFocus
-              type="text"
-              value={pathInput}
-              onChange={e => setPathInput(e.target.value)}
-              onKeyDown={handleFallbackKeyDown}
-              placeholder="/absolute/path/to/project"
-              style={{
-                width: '100%',
-                background: 'var(--color-bg-input)',
-                border: '1px solid var(--color-accent)',
-                borderRadius: 3,
-                color: 'var(--color-text-primary)',
-                padding: '6px 8px',
-                fontSize: 13,
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
-            />
-            {error && (
-              <div style={{ marginTop: 6, color: '#f48771', fontSize: 12 }}>{error}</div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 8 }}>
+              <button onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)} disabled={!folderBrowser?.parentPath || folderBrowserLoading} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', padding: '4px 8px', cursor: folderBrowser?.parentPath && !folderBrowserLoading ? 'pointer' : 'default', opacity: folderBrowser?.parentPath && !folderBrowserLoading ? 1 : .45 }}>↑</button>
+              <div title={folderBrowser?.path} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-secondary)', fontSize: 12 }}>{folderBrowser?.path ?? 'Loading folders…'}</div>
+            </div>
+            <div style={{ height: 260, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-input)' }}>
+              {folderBrowserLoading && <div style={{ padding: '12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>Loading folders…</div>}
+              {!folderBrowserLoading && folderBrowser?.directories.length === 0 && <div style={{ padding: '12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>No subfolders</div>}
+              {!folderBrowserLoading && folderBrowser?.directories.map(directory => <button key={directory.path} onClick={() => void loadFolderBrowser(directory.path)} style={{ display: 'block', width: '100%', border: 'none', background: 'none', color: 'var(--color-text-primary)', textAlign: 'left', padding: '7px 10px', cursor: 'pointer', fontSize: 12 }} onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>📁 {directory.name}</button>)}
+            </div>
+            {folderBrowserError && <div style={{ marginTop: 6, color: '#f48771', fontSize: 12 }}>{folderBrowserError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
               <button
-                onClick={closeFallback}
+                onClick={closeFolderBrowser}
                 style={{
                   padding: '5px 14px',
                   borderRadius: 3,
@@ -848,19 +795,19 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
                 Cancel
               </button>
               <button
-                onClick={handleFallbackSubmit}
-                disabled={!pathInput.trim() || opening}
+                onClick={() => void handleOpenFolder()}
+                disabled={!folderBrowser || opening || folderBrowserLoading}
                 style={{
                   padding: '5px 14px',
                   borderRadius: 3,
-                  background: !pathInput.trim() || opening ? '#ffffff18' : 'var(--color-accent)',
-                  color: !pathInput.trim() || opening ? 'var(--color-text-secondary)' : '#fff',
-                  cursor: !pathInput.trim() || opening ? 'default' : 'pointer',
+                  background: !folderBrowser || opening || folderBrowserLoading ? '#ffffff18' : 'var(--color-accent)',
+                  color: !folderBrowser || opening || folderBrowserLoading ? 'var(--color-text-secondary)' : '#fff',
+                  cursor: !folderBrowser || opening || folderBrowserLoading ? 'default' : 'pointer',
                   fontSize: 13,
                   fontWeight: 600,
                 }}
               >
-                {opening ? 'Opening…' : 'Open'}
+                {opening ? 'Opening…' : 'Open this folder'}
               </button>
             </div>
           </div>

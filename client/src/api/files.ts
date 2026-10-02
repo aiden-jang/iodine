@@ -23,6 +23,17 @@ export async function getWorkspace(): Promise<WorkspaceInfo> {
   return request<WorkspaceInfo>('/api/workspace');
 }
 
+export interface DirectoryBrowserResult {
+  path: string;
+  parentPath: string | null;
+  directories: Array<{ name: string; path: string }>;
+}
+
+export async function browseWorkspaceDirectories(path?: string): Promise<DirectoryBrowserResult> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  return request<DirectoryBrowserResult>(`/api/workspace/directories${query}`);
+}
+
 export async function findWorkspace(name: string): Promise<WorkspaceInfo> {
   return request<WorkspaceInfo>('/api/workspace/find', {
     method: 'POST',

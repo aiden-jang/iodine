@@ -15,6 +15,8 @@ interface MonacoEditorProps {
   onAfterRevert?: () => void;
   /** Fired on editor scroll — used by proactive help activity tracking. */
   onActivity?: () => void;
+  /** Enables Vim keybindings (via monaco-vim) for this editor instance. */
+  vimMode?: boolean;
 }
 
 type DialogState = { hunk: DiffHunk; currents: string[] };
@@ -151,7 +153,7 @@ const configureMonacoLanguages: BeforeMount = (monaco: Monaco) => {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function MonacoEditor({ file, onContentChange, diffData, onEditorMount, onAfterRevert, onActivity }: MonacoEditorProps) {
+export function MonacoEditor({ file, onContentChange, diffData, onEditorMount, onAfterRevert, onActivity, vimMode = false }: MonacoEditorProps) {
   const editorRef = useRef<MonacoEditorAPI.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const decorationIdsRef = useRef<string[]>([]);
@@ -208,6 +210,24 @@ export function MonacoEditor({ file, onContentChange, diffData, onEditorMount, o
 
     setMounted(true);
   };
+
+  // Attach/detach Vim keybindings. monaco-vim is loaded lazily so it only
+  // costs anything once someone actually turns Vim on.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!vimMode || !editor || !mounted) return;
+    let disposed = false;
+    let vim: { dispose(): void } | null = null;
+    import('monaco-vim').then(({ initVimMode }) => {
+      if (disposed) return;
+      vim = initVimMode(editor, null);
+      editor.focus();
+    }).catch(err => console.error('Failed to load monaco-vim', err));
+    return () => {
+      disposed = true;
+      vim?.dispose();
+    };
+  }, [vimMode, mounted]);
 
   // Revert the change previewed in the dialog. Guards against the buffer having
   // moved on (further edits, or a diff refresh that made the hunk stale) while

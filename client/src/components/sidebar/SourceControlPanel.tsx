@@ -477,6 +477,7 @@ function ConfirmDialogOverlay({ dialog }: { dialog: ConfirmDialog }) {
 
 export function SourceControlPanel({ workspacePath, onFileOpen, pendingCommitMessage, onPendingCommitMessageApplied, onCommitSelect }: { workspacePath: string | null; onFileOpen: (absPath: string) => void; pendingCommitMessage?: string | null; onPendingCommitMessageApplied?: () => void; onCommitSelect?: (hash: string) => void }) {
   const sc = useSourceControl(workspacePath);
+  const [pullMenuOpen, setPullMenuOpen] = useState(false);
 
   useEffect(() => {
     if (pendingCommitMessage) {
@@ -535,19 +536,69 @@ export function SourceControlPanel({ workspacePath, onFileOpen, pendingCommitMes
               <BranchSvg />
               {sc.branch}
             </span>
-            <IconButton
-              onClick={() => sc.pull()}
-              title={
-                sc.pullStatus === 'error' ? `Pull failed: ${sc.pullError}`
-                : sc.pullStatus === 'success' ? 'Pulled successfully!'
-                : hasChanges ? 'Pull from remote (workspace must be clean)'
-                : 'Pull from remote (origin HEAD)'
-              }
-              disabled={sc.pullStatus === 'pulling' || hasChanges}
-              style={{ color: pullColor, fontSize: 15, width: 22, height: 22 }}
-            >
-              {pullIcon}
-            </IconButton>
+            <div style={{ position: 'relative' }}>
+              <IconButton
+                onClick={() => setPullMenuOpen(o => !o)}
+                title={
+                  sc.pullStatus === 'error' ? `Failed: ${sc.pullError}`
+                  : sc.pullStatus === 'success' ? 'Done!'
+                  : 'Pull / fetch from remote'
+                }
+                disabled={sc.pullStatus === 'pulling'}
+                style={{ color: pullColor, fontSize: 15, width: 22, height: 22 }}
+              >
+                {pullIcon}
+              </IconButton>
+              {pullMenuOpen && (
+                <>
+                  <div
+                    onClick={() => setPullMenuOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                  />
+                  <div style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 100,
+                    minWidth: 200, padding: 4,
+                    background: 'var(--color-bg-secondary, #252526)',
+                    border: '1px solid var(--color-border)', borderRadius: 4,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  }}>
+                    {[
+                      {
+                        label: 'Pull (rebase)',
+                        hint: hasChanges ? 'Workspace must be clean' : 'origin HEAD',
+                        disabled: hasChanges,
+                        run: () => sc.pull('pull'),
+                      },
+                      {
+                        label: 'Fetch tags',
+                        hint: 'git fetch --tags',
+                        disabled: false,
+                        run: () => sc.pull('fetchTags'),
+                      },
+                    ].map(item => (
+                      <button
+                        key={item.label}
+                        disabled={item.disabled}
+                        onClick={() => { setPullMenuOpen(false); item.run(); }}
+                        style={{
+                          display: 'flex', width: '100%', justifyContent: 'space-between', gap: 12,
+                          padding: '4px 8px', fontSize: 12, textAlign: 'left',
+                          background: 'none', border: 'none', borderRadius: 3,
+                          color: 'var(--color-text-primary, inherit)',
+                          cursor: item.disabled ? 'default' : 'pointer',
+                          opacity: item.disabled ? 0.5 : 1,
+                        }}
+                        onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = 'var(--color-hover, rgba(255,255,255,0.08))'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                      >
+                        <span>{item.label}</span>
+                        <span style={{ color: 'var(--color-text-secondary)', fontSize: 11 }}>{item.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <IconButton
               onClick={() => sc.push()}
               title={
@@ -584,21 +635,24 @@ export function SourceControlPanel({ workspacePath, onFileOpen, pendingCommitMes
                 rows={3}
                 style={{
                   width: '100%', background: 'var(--color-bg-workbench)',
-                  border: '1px solid var(--color-border)', borderRadius: 4,
-                  color: 'var(--color-text-primary)', fontSize: 12,
-                  padding: '6px 8px', resize: 'vertical', boxSizing: 'border-box',
-                  fontFamily: 'var(--font-ui)', outline: 'none',
+                  border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
+                  color: 'var(--color-text-primary)', fontSize: 12, lineHeight: 1.45,
+                  padding: '8px 10px', resize: 'vertical', boxSizing: 'border-box',
+                  fontFamily: 'var(--font-ui)', outline: 'none', display: 'block',
+                  transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
                 }}
               />
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <button
                   onClick={sc.commit}
                   disabled={!canCommit}
                   style={{
-                    flex: 1, padding: '5px 8px', fontSize: 12, fontWeight: 600,
+                    flex: 1, padding: '6px 14px', fontSize: 12, fontWeight: 600,
                     background: canCommit ? 'var(--color-accent)' : 'var(--color-bg-hover)',
                     color: canCommit ? '#fff' : 'var(--color-text-secondary)',
-                    border: 'none', borderRadius: 4,
+                    border: 'none', borderRadius: 'var(--radius-pill)',
+                    boxShadow: canCommit ? 'var(--shadow-sm)' : 'none',
+                    transition: 'background var(--transition-fast), box-shadow var(--transition-fast)',
                     cursor: canCommit ? 'pointer' : 'default',
                   }}
                 >
@@ -609,9 +663,10 @@ export function SourceControlPanel({ workspacePath, onFileOpen, pendingCommitMes
                     onClick={sc.stageAllChanges}
                     title="Stage all changes"
                     style={{
-                      padding: '5px 10px', fontSize: 12,
+                      padding: '6px 14px', fontSize: 12,
                       background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)',
-                      border: '1px solid var(--color-border)', borderRadius: 4,
+                      border: '1px solid var(--color-border)', borderRadius: 'var(--radius-pill)',
+                      transition: 'background var(--transition-fast)',
                       cursor: 'pointer', whiteSpace: 'nowrap',
                     }}
                   >

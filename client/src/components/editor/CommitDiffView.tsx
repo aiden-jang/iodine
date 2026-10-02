@@ -142,7 +142,7 @@ export const CommitDiffView = forwardRef<CommitDiffViewHandle, CommitDiffViewPro
                   const context = `**Commit diff context** — \`${data.shortHash}\` ${data.subject}\nAuthor: ${data.author} · ${formattedDate}${data.body ? '\n\n' + data.body : ''}\n\n\`\`\`diff\n${data.diff}\n\`\`\``;
                   onAddToContext(data.shortHash, context);
                 }}
-                title="Send this diff to the Coding Assistant as context"
+                title="Send this diff to Conversation as context"
                 style={{
                   padding: '3px 10px', fontSize: 12, fontWeight: 600,
                   background: 'rgba(78,201,176,0.12)', color: '#4ec9b0',

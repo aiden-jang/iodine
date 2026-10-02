@@ -63,6 +63,7 @@ export async function runGeminiAgentLoop(
   activeFile: string | null = null,
   customSystemPrompt?: string,
   tutorMode?: boolean,
+  redact: boolean = true,
 ) {
   const apiKey = await loadGeminiKey();
   const ai = new GoogleGenAI({ apiKey });
@@ -139,7 +140,7 @@ export async function runGeminiAgentLoop(
 
       writeSSE(res, 'tool_call', { id: fc.id, name: fc.name, input: fc.args, approval_id: fc.name === 'run_terminal_command' ? fc.id : undefined });
 
-      const result = await executeAgentTool(fc.name, fc.args, res, abortSignal, fc.id);
+      const result = await executeAgentTool(fc.name, fc.args, res, abortSignal, fc.id, redact);
       writeSSE(res, 'tool_result', {
         tool_use_id: fc.id,
         name: fc.name,

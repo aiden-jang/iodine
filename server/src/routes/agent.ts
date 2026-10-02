@@ -1,6 +1,17 @@
 import { Router } from 'express';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, statSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
+
+/** Written while an agent SSE turn is in progress so the dev watcher defers restarts. */
+export const AGENT_LOCK_FILE = join(tmpdir(), 'iodine-agent.lock');
+
+function acquireLock() {
+  try { writeFileSync(AGENT_LOCK_FILE, String(process.pid), 'utf-8'); } catch { /* best effort */ }
+}
+function releaseLock() {
+  try { unlinkSync(AGENT_LOCK_FILE); } catch { /* already gone */ }
+}
 import { loadApiKey, runAgentLoop } from '../services/anthropicAgent';
 import { loadOpenAIKey, runOpenAIAgentLoop } from '../services/openaiAgent';
 import { loadGeminiKey, runGeminiAgentLoop } from '../services/geminiAgent';
@@ -79,13 +90,16 @@ router.post('/agent/revert', async (req, res) => {
 });
 
 router.post('/agent/chat', async (req, res) => {
-  const { messages, model, provider, activeFile, tutorMode } = req.body as {
+  const { messages, model, provider, activeFile, tutorMode, redactSecrets } = req.body as {
     messages?: { role: 'user' | 'assistant'; content: string }[];
     model?: string;
     provider?: string;
     activeFile?: string | null;
     tutorMode?: boolean;
+    redactSecrets?: boolean;
   };
+  // Firewall defaults on; only an explicit `false` from the client disables it.
+  const redact = redactSecrets !== false;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array is required' });
@@ -108,14 +122,19 @@ router.post('/agent/chat', async (req, res) => {
     if (!abortSignal.aborted) res.write(': heartbeat\n\n');
   }, 15_000);
 
+  // Hold the lock so the dev watcher defers file-change restarts until this
+  // turn completes — otherwise a write_file call would restart the server
+  // mid-turn and kill the SSE stream.
+  acquireLock();
+
   try {
     if (selectedProvider === 'openai') {
-      await runOpenAIAgentLoop(messages, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode);
+      await runOpenAIAgentLoop(messages, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode, redact);
     } else if (selectedProvider === 'google') {
-      await runGeminiAgentLoop(messages, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode);
+      await runGeminiAgentLoop(messages, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode, redact);
     } else {
       const history: Anthropic.MessageParam[] = messages.map(m => ({ role: m.role, content: m.content }));
-      await runAgentLoop(history, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode);
+      await runAgentLoop(history, selectedModel, res, abortSignal, activeFile ?? null, undefined, tutorMode, redact);
     }
   } catch (err: unknown) {
     if (!abortSignal.aborted) {
@@ -124,6 +143,7 @@ router.post('/agent/chat', async (req, res) => {
     }
   } finally {
     clearInterval(heartbeat);
+    releaseLock();
     if (!abortSignal.aborted) res.end();
   }
 });

@@ -21,6 +21,8 @@ export interface OpenFile {
   url?: string;
   /** File opened from outside the current workspace via File > Open File… */
   isExternal?: boolean;
+  /** Built-in Settings page (path is SETTINGS_TAB_PATH). */
+  isSettings?: boolean;
 }
 
 export type SidebarView = 'explorer' | 'scm' | 'outline';
@@ -33,6 +35,9 @@ export interface WorkspaceInfo {
 export type UIBlock =
   | { type: 'text'; content: string }
   | { type: 'thought'; content: string }
+  | { type: 'collapsible'; title: string; content: string }
+  /** Meeting-summary ack: 'dismissed' = user replied some other way (renders nothing). */
+  | { type: 'acknowledge'; status: 'pending' | 'done' | 'dismissed' }
   | { type: 'tool'; id: string; name: string; input: Record<string, unknown>;
       result?: string; error?: boolean; pending: boolean }
   | { type: 'command-approval'; id: string; command: string; reason: string; cwd: string | null;

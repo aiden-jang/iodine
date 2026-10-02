@@ -69,10 +69,10 @@ export function Sidebar({
 
   return (
     <div
+      className="panel-card"
       style={{
         width,
         background: 'var(--color-bg-sidebar)',
-        borderRight: '1px solid var(--color-border)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',

@@ -4,8 +4,30 @@ import { Response } from 'express';
 import { executeTool } from './fileTools';
 import { requestTerminalApproval, runTerminalCommand } from './terminalCommands';
 import { rootPath } from '../state';
+import { redactSecrets } from './redactSecrets';
 
+/**
+ * Runs an agent tool and, when `redact` is on, masks secrets in the result
+ * before it goes back to the model. Single choke point for every provider.
+ */
 export async function executeAgentTool(
+  name: string,
+  input: Record<string, unknown>,
+  res: Response,
+  abortSignal: { aborted: boolean },
+  toolCallId?: string,
+  redact: boolean = true,
+) {
+  const result = await executeAgentToolRaw(name, input, res, abortSignal, toolCallId);
+  if (!redact) return result;
+  return {
+    ...result,
+    content: typeof result.content === 'string' ? redactSecrets(result.content) : result.content,
+    preview: typeof result.preview === 'string' ? redactSecrets(result.preview) : result.preview,
+  };
+}
+
+async function executeAgentToolRaw(
   name: string,
   input: Record<string, unknown>,
   res: Response,

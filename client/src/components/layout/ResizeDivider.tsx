@@ -7,6 +7,7 @@ interface ResizeDividerProps {
   max?: number;
   side?: 'left' | 'right'; // which panel's width we're adjusting
   orientation?: 'vertical' | 'horizontal'; // vertical = column resize, horizontal = row resize
+  joined?: boolean; // render as a 1px seam between two joined cards instead of a gutter
 }
 
 export function ResizeDivider({
@@ -16,6 +17,7 @@ export function ResizeDivider({
   max = 800,
   side = 'left',
   orientation = 'vertical',
+  joined = false,
 }: ResizeDividerProps) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -51,17 +53,47 @@ export function ResizeDivider({
 
   const isHorizontal = orientation === 'horizontal';
 
+  if (joined && !isHorizontal) {
+    // 1px seam that continues the card border; a wider invisible hit area
+    // straddles it so it's still easy to grab.
+    return (
+      <div
+        style={{
+          position: 'relative',
+          width: 1,
+          height: '100%',
+          flexShrink: 0,
+          background: 'var(--color-border-card)',
+          transition: 'background var(--transition-fast)',
+          zIndex: 10,
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-accent)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-border-card)'; }}
+      >
+        <div
+          onMouseDown={handleMouseDown}
+          style={{ position: 'absolute', top: 0, bottom: 0, left: -3, width: 7, cursor: 'col-resize' }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       onMouseDown={handleMouseDown}
       style={{
+        // Doubles as the gutter between floating panel cards; on hover only a
+        // thin centered line lights up (padding + content-box clip).
         ...(isHorizontal
-          ? { width: '100%', height: 4 }
-          : { width: 4, height: '100%' }),
+          ? { width: '100%', height: 6, padding: '2px 24px' }
+          : { width: 6, height: '100%', padding: '24px 2px' }),
+        boxSizing: 'border-box',
+        backgroundClip: 'content-box',
         background: 'transparent',
+        borderRadius: 'var(--radius-pill)',
         cursor: isHorizontal ? 'row-resize' : 'col-resize',
         flexShrink: 0,
-        transition: 'background 0.1s',
+        transition: 'background var(--transition-fast)',
         zIndex: 10,
       }}
       onMouseEnter={e => {

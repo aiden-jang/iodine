@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { fetchFileContent, putFileContent, fetchExternalFileContent, putExternalFileContent } from '../api/files';
 import type { FileNode, OpenFile } from '../types';
+import { SETTINGS_TAB_PATH } from '../settings/constants';
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript',
@@ -281,6 +282,23 @@ export function useOpenFiles() {
     setActiveFilePath(path);
   }, []);
 
+  /** Open (or focus) the built-in Settings tab. */
+  const openSettings = useCallback(() => {
+    if (!openFilesRef.current.some(f => f.path === SETTINGS_TAB_PATH)) {
+      const entry: OpenFile = {
+        path: SETTINGS_TAB_PATH,
+        name: 'Settings',
+        content: '',
+        savedContent: '',
+        isDirty: false,
+        language: 'plaintext',
+        isSettings: true,
+      };
+      setOpenFiles(prev => [...prev, entry]);
+    }
+    setActiveFilePath(SETTINGS_TAB_PATH);
+  }, []);
+
   /** Re-fetches a file from disk if it's open and not dirty (called by file watcher). */
   const refreshFile = useCallback((absPath: string) => {
     const file = openFilesRef.current.find(f => f.path === absPath);
@@ -371,6 +389,7 @@ export function useOpenFiles() {
     openFile,
     openDirectory,
     openUrl,
+    openSettings,
     openExternalFile,
     updateContent,
     saveFile,

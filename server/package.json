@@ -2,7 +2,7 @@
   "name": "@iodine/server",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "node watch-dev.mjs",
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -12,7 +12,7 @@
     "@anthropic-ai/sdk": "^0.111.0",
     "@google/genai": "^2.17.1",
     "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
+    "dotenv": "^16.6.1",
     "express": "^4.19.0",
     "fastembed": "^3.0.0",
     "node-pty": "^1.1.0",

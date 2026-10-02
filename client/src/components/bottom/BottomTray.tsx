@@ -26,12 +26,12 @@ export const BottomTray = forwardRef<BottomTrayHandle, BottomTrayProps>(
 
     return (
       <div
+        className="panel-card"
         style={{
           height,
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--color-bg-panel, #1e1e1e)',
-          borderTop: '1px solid var(--color-border)',
           flexShrink: 0,
           overflow: 'hidden',
         }}

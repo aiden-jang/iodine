@@ -9,6 +9,7 @@ export interface ConversationRecord {
   timestamp: number;
   history: { role: 'user' | 'assistant'; content: string }[];
   uiMessages: unknown[];
+  summary?: string;
 }
 
 interface ConversationRouterOptions {
@@ -46,6 +47,14 @@ function isValidUiBlock(value: unknown): boolean {
   if (!isObject(value) || typeof value.type !== 'string') return false;
   if (value.type === 'text' || value.type === 'thought') {
     return typeof value.content === 'string' && value.content.length <= MAX_CONTENT_LENGTH;
+  }
+  if (value.type === 'collapsible') {
+    return typeof value.title === 'string'
+      && typeof value.content === 'string'
+      && value.content.length <= MAX_CONTENT_LENGTH;
+  }
+  if (value.type === 'acknowledge') {
+    return value.status === 'pending' || value.status === 'done' || value.status === 'dismissed';
   }
   if (value.type === 'tool') {
     return typeof value.id === 'string'
@@ -91,6 +100,7 @@ function parseRecord(value: unknown): ConversationRecord | null {
     timestamp: value.timestamp,
     history: value.history,
     uiMessages: value.uiMessages,
+    ...(typeof value.summary === 'string' && value.summary.length <= 500 ? { summary: value.summary } : {}),
   };
 }
 
@@ -147,7 +157,8 @@ export function createConversationsRouter(options: ConversationRouterOptions = {
     const dir = conversationsDir(workspacePath);
     const target = path.join(dir, `${id}.json`);
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    const record: ConversationRecord = { id, timestamp, history, uiMessages };
+    const summary = typeof body.summary === 'string' && body.summary.length <= 500 ? body.summary : undefined;
+    const record: ConversationRecord = { id, timestamp, history, uiMessages, ...(summary ? { summary } : {}) };
 
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -156,6 +167,22 @@ export function createConversationsRouter(options: ConversationRouterOptions = {
       return res.json({ ok: true });
     } catch (error) {
       try { fs.unlinkSync(temp); } catch { /* best effort cleanup */ }
+      return res.status(500).json({ error: errorMessage(error) });
+    }
+  });
+
+  router.delete('/conversations/:id', (req, res) => {
+    const workspacePath = typeof req.query.workspacePath === 'string' ? req.query.workspacePath : undefined;
+    if (!workspacePath) return res.status(400).json({ error: 'workspacePath is required' });
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+
+    const file = path.join(conversationsDir(workspacePath), `${id}.json`);
+    try {
+      fs.unlinkSync(file);
+      return res.json({ ok: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return res.json({ ok: true });
       return res.status(500).json({ error: errorMessage(error) });
     }
   });

@@ -37,8 +37,12 @@ export async function fetchFileTree(): Promise<FileNode> {
 }
 
 export async function fetchFileContent(path: string): Promise<string> {
-  const data = await request<{ content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`);
-  return data.content;
+  return (await fetchFileWithPath(path)).content;
+}
+
+/** Like fetchFileContent, but also returns the server-resolved absolute path. */
+export async function fetchFileWithPath(path: string): Promise<{ path: string; content: string }> {
+  return request<{ path: string; content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`);
 }
 
 export async function deleteNode(nodePath: string): Promise<void> {
@@ -278,6 +282,10 @@ export async function pushBranch(): Promise<void> {
 
 export async function pullBranch(): Promise<{ ok: boolean; status: string; message?: string; error?: string }> {
   return request<{ ok: boolean; status: string; message?: string; error?: string }>('/api/git/pull', { method: 'POST' });
+}
+
+export async function fetchTags(): Promise<{ ok: boolean; status: string; message?: string; error?: string }> {
+  return request<{ ok: boolean; status: string; message?: string; error?: string }>('/api/git/fetch-tags', { method: 'POST' });
 }
 
 export interface RefGithubUrl {

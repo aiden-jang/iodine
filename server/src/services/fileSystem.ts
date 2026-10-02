@@ -93,6 +93,14 @@ export function isBinaryExtension(filePath: string): boolean {
   return BINARY_EXTENSIONS.has(ext);
 }
 
+/**
+ * Resolve a possibly workspace-relative path to an absolute one.
+ * Relative paths are resolved against the workspace root, never the server's cwd.
+ */
+export function resolveWorkspacePath(inputPath: string, rootPath: string): string {
+  return path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(rootPath, inputPath);
+}
+
 export async function readFileContent(filePath: string, rootPath: string): Promise<string> {
   validatePath(filePath, rootPath);
   if (isBinaryExtension(filePath)) {

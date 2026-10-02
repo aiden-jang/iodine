@@ -7,6 +7,7 @@ export interface ConversationRecord {
   timestamp: number;
   history: HistoryMessage[];
   uiMessages: UIMessage[];
+  summary?: string;
 }
 
 export async function fetchConversations(workspacePath: string): Promise<ConversationRecord[]> {
@@ -22,6 +23,13 @@ export async function saveConversation(workspacePath: string, conv: Conversation
     body: JSON.stringify({ workspacePath, ...conv }),
   });
   if (!res.ok) throw new Error(`Failed to save conversation (HTTP ${res.status})`);
+}
+
+export async function deleteConversation(workspacePath: string, id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}?workspacePath=${encodeURIComponent(workspacePath)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete conversation (HTTP ${res.status})`);
 }
 
 export async function clearConversations(workspacePath: string): Promise<void> {

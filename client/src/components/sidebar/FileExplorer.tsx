@@ -262,12 +262,7 @@ export function FileExplorer({
           flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minWidth: 0 }}>
-          <img
-            src="/logo.png"
-            alt=""
-            style={{ width: 16, height: 16, objectFit: 'contain', borderRadius: 2, flexShrink: 0 }}
-          />
+        <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden', minWidth: 0 }}>
           <span
             style={{
               fontSize: 11,

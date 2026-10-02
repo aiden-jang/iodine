@@ -12,7 +12,7 @@ Several features have branded display names shown in the UI. These names must **
 |-----------------|-------------------------------|
 | **Iogram** | `systemView` / `system` / `SystemView` |
 | **IOPEDIA** | `outline` / `OutlinePanel` |
-| **Coding Assistant** | `codingAssistant` / `CodingAssistant` |
+| **Conversation** | `codingAssistant` / `CodingAssistant` |
 
 Examples of correct usage:
 - Tab id: `'system'` ✓ — not `'iogram'`
@@ -257,11 +257,11 @@ Files and folders can be pinned to the Coding Assistant via the `+` hover menu i
 
 #### Right Panel & Provider/Model Display
 
-The right panel contains three tabs: **Coding Assistant**, **Build**, and **System View**. Each tab can use a different LLM provider and model. The **Provider/Model callout** (showing current provider name and model label) appears above all three tabs *except* the Coding Assistant tab, where the provider and model are set directly within the chat UI and displaying them would be redundant.
+The right panel contains three tabs: **Conversation**, **Build**, and **System View**. Each tab can use a different LLM provider and model. The **Provider/Model callout** (showing current provider name and model label) appears above all three tabs *except* the Conversation tab, where the provider and model are set directly within the chat UI and displaying them would be redundant.
 
 | File | Role |
 |------|------|
-| `client/src/components/layout/RightPanel.tsx` | Conditionally renders the Provider/Model info box only when `activeTab !== 'assistant'`. The callout is hidden for the Coding Assistant tab to avoid redundancy. |
+| `client/src/components/layout/RightPanel.tsx` | Conditionally renders the Provider/Model info box only when `activeTab !== 'assistant'`. The callout is hidden for the Conversation tab to avoid redundancy. |
 
 #### Commit Message Composition and SCM View Mounting
 
@@ -278,18 +278,26 @@ The `git_commit_compose` tool populates the Source Control commit editor through
 
 Completed conversations are automatically saved to disk and surfaced in the empty state so the user can resume them after a browser refresh.
 
-**Storage:** Each conversation is a JSON file at `~/.iodine/<workspace-md5>/conversations/<conversationId>.json`. The workspace hash is the same MD5 used elsewhere in the cache hierarchy. Up to 3 most-recent conversations (by `timestamp`) are returned by the server; there is no automatic pruning of older files beyond what the user explicitly clears.
+**Storage:** Each conversation is a JSON file at `~/.iodine/<workspace-md5>/conversations/<conversationId>.json`. The workspace hash is the same MD5 used elsewhere in the cache hierarchy. Up to 6 most-recent conversations (by `timestamp`) are returned by the server; there is no automatic pruning of older files beyond what the user explicitly clears.
 
-**Empty state UI:** When there are no UI messages and at least one past conversation exists, the chat area shows a "Recent" list instead of the default "Ask about your code" placeholder. Each row displays a formatted timestamp (e.g. "Today at 2:34 PM" or "Aug 6, 2026 at 11:00 AM") and a message count. Clicking a row restores the full conversation. A "Clear all" button removes all saved conversations for the current workspace. Typing and sending a new message starts a fresh conversation with a new ID.
+**Empty state UI:** When there are no UI messages and at least one past conversation exists, the chat area shows a "Recent" list instead of the default placeholder. Each row shows a **summary** (if generated) as the title with the timestamp below, or just the timestamp and message count for conversations without a summary. Clicking a row restores the full conversation. A "Clear all" button removes all saved conversations for the current workspace.
 
-**Save trigger:** Conversation is written to disk inside the `done` SSE handler, after the assistant message is finalized. A nested `setUiMessages(prev => { ...; return prev })` pattern reads the latest state without causing an extra render. Transient flags (`isStreaming`, `pending`, approval `status: 'pending' → 'rejected'`) are stripped via `normalizeForSave()` before writing.
+**Save triggers:**
+- **Normal completion:** written inside the `done` SSE handler after the assistant message is finalised.
+- **Proactive/meeting injection:** `injectProactiveMessage` saves immediately after appending the injected message, so meeting notes and proactive messages survive a page reload.
+- **Network error / server restart mid-turn:** the `catch` block in `sendMessage` saves the partial turn (tool blocks completed so far + error notice) so the conversation is not lost when the server restarts during an agent edit.
+
+Transient flags (`isStreaming`, `pending`, approval `status: 'pending' → 'rejected'`) are stripped via `normalizeForSave()` before writing.
+
+**Conversation summary:** After the 3rd assistant reply (and on any subsequent reply while no summary exists yet), a background call to `POST /api/proactive/conversation-summary` generates a short phrase (5–8 words) describing the conversation. The conversation is re-saved with the `summary` field and the recent list updates. `hasSummaryRef` and `summaryRef` in `useCodingAssistant` track whether the current session already has a summary to avoid duplicate generation. `loadConversation` seeds both refs from the loaded record.
 
 | File | Role |
 |------|------|
-| `client/src/api/conversations.ts` | `fetchConversations(workspacePath)`, `saveConversation(workspacePath, record)`, `clearConversations(workspacePath)` — thin wrappers around the REST API. |
-| `client/src/hooks/useCodingAssistant.ts` | Accepts `workspacePath` as a 3rd parameter. Owns `conversationIdRef` (reset on `clearMessages`, reused on `loadConversation`). Saves on every completed reply. Exposes `loadConversation(record)` and `clearAllConversations()`. |
-| `client/src/components/right/CodingAssistant.tsx` | `pastConversations` state fetched on mount and on workspace change. `handleClearAll` calls `clearAllConversations` and resets local state. Renders conversation list or default placeholder based on `pastConversations.length`. |
-| `server/src/routes/conversations.ts` | `GET /api/conversations?workspacePath=` returns last 3 sorted by timestamp. `POST /api/conversations` writes `<id>.json`. `DELETE /api/conversations?workspacePath=` removes all `.json` files in the workspace's conversations dir. |
+| `client/src/api/conversations.ts` | `fetchConversations(workspacePath)`, `saveConversation(workspacePath, record)`, `clearConversations(workspacePath)` — thin wrappers around the REST API. `ConversationRecord` includes optional `summary?: string`. |
+| `client/src/hooks/useCodingAssistant.ts` | Accepts `workspacePath` as a 3rd parameter. Owns `conversationIdRef` (reset on `clearMessages`, reused on `loadConversation`). `hasSummaryRef` / `summaryRef` track the generated summary. Saves on every completed reply, on `injectProactiveMessage`, and on network error. Exposes `loadConversation(record)` and `clearAllConversations()`. |
+| `client/src/components/right/CodingAssistant.tsx` | `pastConversations` state fetched on mount and on workspace change. `handleClearAll` calls `clearAllConversations` and resets local state. Renders summary (or date + count fallback) in the recent list. |
+| `server/src/routes/conversations.ts` | `GET /api/conversations?workspacePath=` returns last 6 sorted by timestamp. `POST /api/conversations` writes `<id>.json` (accepts optional `summary` field). `DELETE /api/conversations?workspacePath=` removes all `.json` files in the workspace's conversations dir. |
+| `server/src/routes/proactive.ts` | `POST /api/proactive/conversation-summary` — non-streaming single-turn LLM call, max 40 tokens, returns `{ summary: string \| null }`. |
 
 ### Workspace Management
 
@@ -462,15 +470,26 @@ Clicking a node or edge in the System View graph highlights it and opens a botto
 
 #### Terminal (PTY) Lifecycle & Cleanup
 
-Each terminal tab opens a WebSocket to `ws://localhost:3001/terminal?cwd=…&cmd=…`. The server uses **node-pty** to spawn a pseudo-terminal (PTY) for the requested shell. Robust cleanup is critical because `tsx watch` kills and restarts the Node process on every file save, which would otherwise orphan PTY children and leak OS file descriptors until `posix_spawnp` starts failing.
+Each terminal tab opens a WebSocket to `ws://localhost:3001/terminal?cwd=…&cmd=…`. The server uses **node-pty** to spawn a pseudo-terminal (PTY) for the requested shell. Robust cleanup is critical because the dev watcher kills and restarts the Node process on every file save, which would otherwise orphan PTY children and leak OS file descriptors until `posix_spawnp` starts failing.
 
 | File | Role |
 |------|------|
-| `server/src/terminal.ts` | All active PTY instances are tracked in a module-level `activePtys: Set`. SIGTERM, SIGINT, and `process.exit` handlers call `killAllPtys()` (sends SIGKILL) so `tsx watch` restarts fully clean up open shells. Spawn uses `spawnWithRetry`: on failure it waits 250 ms and retries once to handle transient `EAGAIN` errors. `MAX_TERMINALS = 20` cap prevents runaway resource use. PTY instances are removed from the set in both `ptyProc.onExit` and `ws.on('close')` to stay accurate regardless of which side closes first. |
+| `server/src/terminal.ts` | All active PTY instances are tracked in a module-level `activePtys: Set`. SIGTERM, SIGINT, and `process.exit` handlers call `killAllPtys()` (sends SIGKILL) so dev watcher restarts fully clean up open shells. Spawn uses `spawnWithRetry`: on failure it waits 250 ms and retries once to handle transient `EAGAIN` errors. `MAX_TERMINALS = 20` cap prevents runaway resource use. PTY instances are removed from the set in both `ptyProc.onExit` and `ws.on('close')` to stay accurate regardless of which side closes first. |
 
-**Key failure mode:** `posix_spawnp failed` from node-pty is an OS-level `EAGAIN` or similar, most often triggered by accumulated file descriptors from pty processes that were not killed when the dev server restarted. The fix is the SIGTERM/SIGINT handler — when `tsx watch` sends SIGTERM before relaunching, all PTY children are killed before the process exits.
+**Key failure mode:** `posix_spawnp failed` from node-pty is an OS-level `EAGAIN` or similar, most often triggered by accumulated file descriptors from pty processes that were not killed when the dev server restarted. The fix is the SIGTERM/SIGINT handler — when the watcher sends SIGTERM before relaunching, all PTY children are killed before the process exits.
 
 **Shell selection:** `process.env.SHELL` → `/bin/zsh` → `/bin/bash` → `/bin/sh`, with `existsSync` validation at each step.
+
+#### Agent Lock — Deferring Restarts During Active Turns
+
+When the agent edits a server source file mid-turn, a naive watcher would restart the process and kill the SSE stream before subsequent tool calls (`edit_file`, `write_file`) can complete. The lock mechanism prevents this.
+
+| File | Role |
+|------|------|
+| `server/src/routes/agent.ts` | `acquireLock()` writes `AGENT_LOCK_FILE` (`os.tmpdir()/iodine-agent.lock`) at the start of every `/agent/chat` SSE handler; `releaseLock()` deletes it in the `finally` block so it is always cleaned up even on error or abort. |
+| `server/watch-dev.mjs` | Replaces `tsx watch`. Watches `src/**/*.ts` with a 300 ms debounce. On change, polls `AGENT_LOCK_FILE` every second; while it exists the restart is held and a status line is printed. After the lock clears (or after a 2-minute safety timeout), the server process receives SIGTERM and is restarted once it exits. Forwards SIGTERM/SIGINT to the child so `concurrently` can tear down the whole tree cleanly. |
+
+**Dev script:** `server/package.json` `"dev"` runs `node watch-dev.mjs` instead of `tsx watch src/index.ts`.
 
 #### System View — Active File Chip
 
@@ -800,7 +819,7 @@ Completed assistant messages longer than 120 characters show a **Voice Memo** ch
 | `server/src/app.ts` | Registers `ttsRouter` at `/api`. |
 | `client/src/components/right/CodingAssistant.tsx` | `speakingMsgId`, `verballyLoadingId`, `verballyError` states + `audioRef`. `handleVerbally(msgId, text)` stops any current playback, calls the endpoint, creates a blob URL, and plays it via `new Audio(url)`. Error message surfaces in a dismissable banner above the input. Anthropic users see a modal with one-click switches to OpenAI or Google. `MessageBubble` receives `onVerbally`, `isSpeaking`, `isVerballyLoading` props; the chip is hidden for messages ≤ 120 characters. |
 
-**Narration prompt:** Instructs the model to narrate as a confident presenter speaking live over a slide — strip code blocks, markdown, and hedging; distill to 2–4 natural spoken sentences; no self-introduction or "this slide shows".
+**Narration prompt:** Instructs the model to narrate as a confident presenter speaking live over a slide — strip code blocks, markdown, and hedging; distill to 2–4 natural spoken sentences; no self-introduction or “this slide shows”.
 
 **Provider IDs:** `'openai'` and `'google'` (not `'gemini'`) — match the values in `client/src/providers.ts`.
 
@@ -808,15 +827,7 @@ Completed assistant messages longer than 120 characters show a **Voice Memo** ch
 
 **Speaking indicator:** While audio plays the chip content switches to `SpeakingWave` — 7 vertical bars (2 px wide, `currentColor`) animated with `@keyframes wave-bar` (2 px → 11 px, 0.65 s ease-in-out, alternating) and staggered `animationDelay` values to produce an equalizer ripple. The bars inherit the chip's teal accent via `currentColor`.
 
-**Tutor mode integration:** When Tutor mode is on, the Verbally chip is shown on every assistant message regardless of length (`alwaysVerbally` prop bypasses the 120-char threshold). At the end of each generation the auto-speak effect enqueues the condensed Verbally response onto the same narration queue used by tool narrations — it never interrupts them. Exploration/navigation narrations (`read_file`, `open_file`, `list_directory`, `search_files`) are marked `skippable: true` and are evicted from the queue as soon as the Verbally audio fetch resolves, so Verbally follows the current clip without waiting for remaining exploration phrases. Edit/write narrations (`edit_file`, `write_file`) are marked `skippable: false` and are always played through. The per-turn edit/write flag is reset when the turn completes, so it cannot affect a later turn. On exploration-only turns (no edit/write narrations that turn), a brief transition phrase ("Aha.", "Got it.", etc.) is inserted before Verbally to bridge the two naturally; this transition is suppressed on turns that included edit/write narrations because those already signal completion.
-
-**Direct-speech fast path:** Auto-spoken responses under 15 whitespace-delimited words with no tool narrations that turn bypass `/api/tts/verbally` and call `/api/tts/speak` directly (no condensation).
-
-**Greeting on first response:** The first assistant message in a new thread may be preceded by a dedicated greeting audio clip. `enqueueGreeting(mode)` in `useToolNarration` pushes a non-skippable `/api/tts/speak` clip onto the narration queue before `sendMessage` is called, guaranteeing the playback order: greeting → tool narrations → condensed response. The mode is determined at send time by snapshotting `pastConversationsRef.current.length` — `'hello'` when empty (confirmed new user), `'welcomeBack'` when entries exist. Greeting is suppressed entirely (not enqueued) when history is still loading, when the load failed, or when the thread is not new. `handleSend` reads `conversationsLoading` React state and `conversationLoadError` state directly (render closure). `transcribeAndSend` reads `conversationsLoadingRef` and `conversationLoadErrorRef` — ref mirrors kept in sync at every `setConversationsLoading` / `setConversationLoadError` call — because it runs inside a stale `useCallback` closure. `handleClearAll` zeroes `pastConversationsRef.current` so the next new thread resolves to `'hello'`. Greeting is only enqueued in tutor mode; non-tutor sessions never trigger it.
-
-**Tutor mode tool call narration:** Each `tool_call` SSE event during a tutor-mode turn triggers a randomised short phrase from `TOOL_NARRATION_PHRASES` keyed by tool name. Narration logic lives in `client/src/hooks/useToolNarration.ts`; `git_commit_compose` has dedicated phrases such as “Let me draft a commit message.” The hook owns the `NarrationEntry` queue (`{ fn, skippable }`), generation counter, deduplication set, and per-turn `hadUnskippableRef` flag (set whenever an edit/write narration is queued, reset by `resetTurn()`). Exposed API: `narrate`, `enqueueGreeting`, `stop`, `drain`, `evictSkippable`, `resetTurn`, plus refs (`queueRef`, `audioRef`, `hadNarrationsRef`, `hadUnskippableRef`, `onEmptyRef`). The `POST /api/tts/speak` endpoint handles direct TTS without a condensation step. The queue stops on new message send, tutor mode toggle off, manual Verbally click, and component unmount.
-
-**Tutor mode system prompt:** The scripted "Ready to start? Say go" turn-1 ending has been removed. The AI presents its plan and ends conversationally — no scripted cues like "say next" or "say go" anywhere in the prompt.
+**Tutor mode system prompt:** The AI presents its plan and ends conversationally — no scripted cues like “say next” or “say go” anywhere in the prompt.
 
 ## Voice Input (STT)
 
@@ -833,6 +844,72 @@ A microphone button sits left of the Send button in the Coding Assistant input r
 **Provider support:** OpenAI and Google only — same restriction as Verbally. Anthropic users see the existing "switch provider" dialog.
 
 **Auto-send:** After transcription succeeds, `sendMessage` is called directly with the transcribed text; the textarea is not populated.
+
+## Live Meeting
+
+A real-time bidirectional voice session powered by the Gemini Live API (BidiGenerateContent WebSocket). A **Start a meeting** button appears above the chat textarea once the Google provider is active and at least one assistant reply exists in the current thread. Clicking it opens a floating draggable card over the editor with a continuous monochrome waveform, a mute toggle, and a close button. When the meeting ends the transcript is injected into the chat as an assistant message and also passed as context to the next API call.
+
+| File | Role |
+|------|------|
+| `client/src/hooks/useLiveMeeting.ts` | Core hook. Manages mic capture (`ScriptProcessorNode`), PCM resampling (48 kHz → 16 kHz), Gemini relay WebSocket, output playback queue, output `AnalyserNode` for waveform, and transcript accumulation. `start(context?)` accepts the prior conversation as a string and stores it in `contextRef`. Incoming relay messages go to the pure `handleGeminiMessage` in `geminiMessage.ts`; the hook only executes the returned actions and runs voice-agent tools (see **Live Meeting — Message Handling & Voice Tools**). `stop()` formats accumulated transcript entries and calls `onTranscriptReady`. |
+| `client/src/hooks/geminiMessage.ts` | Pure message logic, no WebSocket/React/audio. Builds the setup payload (model, prompt, voice, transcription flags, tool declarations), handles `setupComplete` (silent `'hi'` trigger for the opening greeting), audio parts, transcript buffering, `turnComplete` flush and `toolCall`. Also exports tool helpers `formatReadFileOutput`, `searchFilePaths`, `formatSearchFilesOutput`, and `speakingAfterAgentEnds`. Tested in `geminiMessage.test.ts`. |
+| `client/src/prompts/prompt.ts` | `buildLiveMeetingPrompt(ctx?)` — the agent's system instruction. Shared `tone`, `language` and `tools` paragraphs are used by both the with-context and fallback variants. |
+| `client/src/components/editor/LiveMeetingCard.tsx` | Floating card (240×148 px, `position:absolute`). Defaults to the bottom-right of the editor container via `useLayoutEffect`. Draggable via window-level `mousemove`/`mouseup` listeners. Canvas waveform: `getByteTimeDomainData` sampled at ~80 points per frame, smoothed with the quadratic bezier midpoint method, stroked with a vertical monochrome gradient (transparent → white → transparent). Idle state: animated sine wave using `Date.now()`. |
+| `server/src/meeting.ts` | WebSocket relay at `/meeting/relay`. Connects to the Gemini Live `v1beta` BidiGenerateContent endpoint, forwards text frames as text and binary frames as binary. Tracks active relay sockets for SIGTERM/SIGINT cleanup. |
+| `client/src/components/layout/EditorArea.tsx` | Renders `<LiveMeetingCard>` as `position:absolute; inset:0; zIndex:10` overlay when `activeMeeting` is true. |
+| `client/src/components/layout/WorkbenchLayout.tsx` | Mounts `useLiveMeeting(provider.id, onTranscriptReady)`. `onTranscriptReady` calls `rightPanelRef.current?.injectProactiveMessage(transcript, async () => transcript)` so the transcript is both visible in the UI and passed as context to the next agent call. |
+| `client/src/components/layout/RightPanel.tsx` | `meetingActive` prop locks the panel to the Coding Assistant tab (other tabs disabled). Threads `onMeetingStart` and `meetingError` to `CodingAssistant`. |
+| `client/src/components/right/CodingAssistant.tsx` | **Start a meeting** button above the textarea — shown when provider is Google + at least one assistant reply exists + no active meeting. Formats `uiMessages` into `User: … / Assistant: …` blocks and passes them to `onMeetingStart(context)`. During an active meeting: textarea, send, mic, Conversations button, and clear button are all disabled; a teal banner with an orange pulsing dot is shown. |
+
+**Audio graph:**
+```
+Gemini PCM → BufferSource → outputAnalyser (fftSize=2048) → AudioContext.destination
+Mic stream → ScriptProcessorNode (PCM capture, output silenced)
+```
+The waveform visualises Gemini's audio output, not the user's mic.
+
+**Transcript accumulation:** `inputAudioTranscription: {}` and `outputAudioTranscription: {}` are enabled in the Gemini setup `generationConfig`. Text chunks arrive in `serverContent.inputTranscription.text` (user) and `serverContent.outputTranscription.text` (Gemini). Chunks are buffered per-turn and flushed into `transcriptRef` on each `turnComplete` event. On `stop()` the accumulated entries are formatted as `**You:** / **Gemini:**` markdown and fired via `onTranscriptReady`.
+
+**Chat freeze during meeting:** All interactive chat controls are disabled while `meetingActive` is true. The Conversations list is closed automatically, and switching to Build or Iogram tabs is prevented.
+
+**Provider restriction:** Google only. Attempting to start with a different provider surfaces an error in the chat input area.
+
+### Live Meeting — Message Handling & Voice Tools
+
+**Pure handler + actions:** `handleGeminiMessage(msg, buffers, deps)` returns `{ buffers, actions }`. Actions are data only (`send`, `setError`, `stop`, `markReady`, `setSpeakingAgent`, `playAudio`, `pushTranscript`, `endAgentSpeaking`, `runTool`); `useLiveMeeting` executes them. Keep new message branches in the pure function and cover them in `geminiMessage.test.ts` — do not add logic to the hook's action switch beyond executing effects.
+
+- `playAudio` carries raw base64; the hook decodes it (keeps audio APIs out of tests).
+- `endAgentSpeaking` maps to `setSpeaking(speakingAfterAgentEnds)`, which only clears `'agent'` → `'idle'` and never overwrites `'user'`.
+
+**Voice tools** (declared in the setup message, executed in the hook's `runTool` case, answered with `toolResponse.functionResponses`):
+
+| Tool | Behaviour |
+|------|-----------|
+| `search_files(query)` | Walks `fetchFileTree()` client-side (no server route). Every query word must appear in the path, case/punctuation-insensitive, so spoken names like "gemini message" match `geminiMessage.ts`. Exact filename matches first, capped at 10, returns workspace-relative paths. Output tells the agent to confirm a single match and read multiple matches one at a time. Limited by the tree depth (6 levels). |
+| `read_file(path, start_line?, end_line?)` | `fetchFileContent` + `formatReadFileOutput`, always capped at 200 lines. |
+| `open_file(path, line?)` | Fetches via `fetchFileWithPath` first and **fails hard** if it can't load; then calls the editor navigate callback with the **absolute path returned by the server**, so fetch and navigation always agree. With no `line`, it jumps to the main uncommitted change (see **Diff jump**). The result never echoes the path (it would get read aloud). |
+
+**Diff jump** (pure helpers in `geminiMessage.ts`): `headerEndLine(content)` finds where the leading imports/comments end (multi-line imports included). `pickDiffJump(hunks, content)` picks the largest hunk outside that header (added + removed lines, earlier wins ties), falling back to the first hunk if all changes are imports. `formatDiffJumpOutput` lists every changed section (e.g. `3-4 (imports), 20-35, 88`) so the agent can go to "next change" itself. A `fetchFileDiff` failure (untracked file, no repo) opens at the top instead of failing.
+
+**Open tabs in context:** on `relay-ready`, the hook reads the workbench's open tabs (`getEditorTabs`) and passes `formatOpenTabs(...)` as `deps.tabs`; the prompt gets an `[OPEN TABS]` block with exact paths and the active tab marked. Tabs are captured once at meeting start — files opened mid-call aren't reflected.
+
+**Failure contract:** any tool error is returned as `response: { error: "FAILED: … Do not retry; tell the user it failed." }`, never as an `output` string. Tools must never report success they haven't verified — an unconditional "Opened …" caused a retry loop and hallucinated file contents.
+
+**Path resolution:** `GET /api/files/content` resolves relative paths against the workspace root via `resolveWorkspacePath` (`server/src/services/fileSystem.ts`) and still enforces `OUTSIDE_ROOT`. Without this, relative paths resolved against the server's cwd and failed with "File not found". Tests: `server/tests/fileSystem.test.ts`.
+
+**Prompt rules for file selection** (`prompt.ts` `tools` paragraph):
+1. No file named or the sentence cut off → ask which file; call no tool.
+2. File in `[OPEN TABS]` or full path spoken → open it directly, no confirmation. Never pass a bare filename to `open_file`.
+3. Vague name → guess from open tabs, then the git diff, then files mentioned in the conversation; ask "Do you mean X?" and wait for a yes.
+4. Declined or no guess → say it will search, then call `search_files` with key words (transcription mishears extensions, e.g. "file.txt" for "files.ts").
+5. Multiple matches → offer one at a time, pausing for yes/no. Pausing is prompt-enforced only.
+
+**Prompt rules for showing code and speaking:**
+- "Read / see / show me" a file means `open_file`; scroll / jump / next change means `open_file` with `line`. `read_file` is only for the agent's own understanding and is used silently.
+- Tool calls are silent by default. The agent speaks about a tool only to confirm an ambiguous file, offer candidates, announce a search after a wrong guess, or report a failure. It still names the file (short name) when switching files.
+- A full path is said aloud at most once, when confirming; short names after that. No line numbers unless asked.
+
+The prompt also states the tools are real (earlier context claiming otherwise is outdated) and forbids describing a file not read in this call.
 
 ## Implementation Notes
 

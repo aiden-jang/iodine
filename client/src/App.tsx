@@ -1,5 +1,10 @@
 import { WorkbenchLayout } from './components/layout/WorkbenchLayout';
+import { SettingsProvider } from './settings';
 
 export default function App() {
-  return <WorkbenchLayout />;
+  return (
+    <SettingsProvider>
+      <WorkbenchLayout />
+    </SettingsProvider>
+  );
 }

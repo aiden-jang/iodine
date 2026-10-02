@@ -40,7 +40,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export function ActivityBar({ activeView, onViewChange, gitChangeCount = 0 }: ActivityBarProps) {
   return (
-    <div style={{ width: 'var(--activity-bar-width)', background: 'var(--color-bg-activity-bar)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4, borderRight: '1px solid var(--color-border)', flexShrink: 0 }}>
+    <div style={{ width: 'var(--activity-bar-width)', background: 'transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4, flexShrink: 0 }}>
       {NAV_ITEMS.map(item => {
         const isActive = activeView === item.id;
         const isGitIcon = item.id === 'scm';

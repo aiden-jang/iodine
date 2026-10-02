@@ -162,14 +162,18 @@ export async function runTerminalCommand(
 
   return new Promise<ToolResult>((resolve) => {
     const id = randomUUID();
-    // Windows has no POSIX shells by default; cmd.exe needs /c instead of -lc.
+    // Windows: always use cmd.exe. SHELL is ignored because Git Bash/MSYS set it to
+    // a POSIX path (/usr/bin/bash) that Windows can't spawn directly.
     const isWindows = process.platform === 'win32';
-    const shell = process.env.SHELL || (isWindows ? process.env.ComSpec || 'cmd.exe' : '/bin/bash');
-    const shellArgs = isWindows ? ['/d', '/s', '/c', request.command] : ['-lc', request.command];
+    const shell = isWindows ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || '/bin/bash';
+    // Wrap in quotes + verbatim args (same as Node's own `shell: true`) so Node
+    // doesn't backslash-escape quotes, which cmd.exe doesn't understand.
+    const shellArgs = isWindows ? ['/d', '/s', '/c', `"${request.command}"`] : ['-lc', request.command];
     const child = spawn(shell, shellArgs, {
       cwd: rootPath!,
       env: process.env,
       detached: false,
+      windowsVerbatimArguments: isWindows,
     });
     runningProcesses.set(id, child);
 

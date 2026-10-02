@@ -4,6 +4,7 @@ import type { Provider } from '../providers';
 import { fetchOverallDiff } from '../api/files';
 import { saveConversation, clearConversations, type ConversationRecord } from '../api/conversations';
 import { createEventContextQueue, formatEventContext, type EventContext } from '../utils/eventContextQueue';
+import { redactSecrets } from '../utils/redactSecrets';
 
 function uid() {
   return typeof crypto.randomUUID === 'function'
@@ -22,6 +23,10 @@ function normalizeForSave(msgs: UIMessage[]): UIMessage[] {
         if (block.type === 'tool') return { ...block, pending: false };
         if (block.type === 'command-approval' && block.status === 'pending') {
           return { ...block, status: 'rejected' as const };
+        }
+        // Proactive context lives in memory only, so an ack after reload would be empty.
+        if (block.type === 'acknowledge' && block.status === 'pending') {
+          return { ...block, status: 'dismissed' as const };
         }
         return block;
       }),
@@ -45,9 +50,9 @@ export function useCodingAssistant(
   onNavigateToLine?: (filePath: string, line: number, endLine?: number, startCol?: number, endCol?: number) => void,
   onWatchTrigger?: () => void,
   onAssistantReply?: (text: string, hadToolUse: boolean) => void,
-  onToolNarration?: (name: string, input: Record<string, unknown>, approvalId?: string) => void,
   onFileTreeRefresh?: () => void,
   onSummaryRequest?: (filePath: string) => void,
+  redactSecretsEnabled: boolean = true,
 ) {
   const [uiMessages, setUiMessages] = useState<UIMessage[]>([]);
   const [history, setHistory] = useState<HistoryMessage[]>([]);
@@ -71,11 +76,12 @@ export function useCodingAssistant(
   const onAssistantReplyRef = useRef(onAssistantReply);
   onAssistantReplyRef.current = onAssistantReply;
 
-  const onToolNarrationRef = useRef(onToolNarration);
-  onToolNarrationRef.current = onToolNarration;
-
   const onFileTreeRefreshRef = useRef(onFileTreeRefresh);
   onFileTreeRefreshRef.current = onFileTreeRefresh;
+
+  // Ref so toggling the setting takes effect without rebuilding sendMessage.
+  const redactSecretsEnabledRef = useRef(redactSecretsEnabled);
+  redactSecretsEnabledRef.current = redactSecretsEnabled;
 
   // Tracks whether any tool was called in the current turn; reset at start of sendMessage.
   const toolUsedInTurnRef = useRef(false);
@@ -106,12 +112,20 @@ export function useCodingAssistant(
   const pendingSaveRef = useRef<PendingConversationSave | null>(null);
   const failedSaveRef = useRef<PendingConversationSave | null>(null);
   const pendingProactiveContextRef = useRef<(() => Promise<string>) | null>(null);
+  const hasSummaryRef = useRef(false);
+  const summaryRef = useRef<string | undefined>(undefined);
   const eventContextQueueRef = useRef(createEventContextQueue());
   const armedReplyRef = useRef<string | null>(null);
 
   // Keep workspacePath current without adding it to sendMessage's dependency array.
   const workspacePathRef = useRef(workspacePath);
   workspacePathRef.current = workspacePath;
+
+  // Mirror history/uiMessages state so stable callbacks can read the current value.
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const uiMessagesRef = useRef(uiMessages);
+  uiMessagesRef.current = uiMessages;
 
   // A conversation belongs to exactly one workspace. Reset all in-memory
   // session state when that scope changes so history cannot cross projects.
@@ -127,6 +141,8 @@ export function useCodingAssistant(
     thoughtBufRef.current = '';
     pendingProactiveContextRef.current = null;
     armedReplyRef.current = null;
+    hasSummaryRef.current = false;
+    summaryRef.current = undefined;
     pendingSaveRef.current = null;
     failedSaveRef.current = null;
     conversationIdRef.current = uid();
@@ -152,6 +168,8 @@ export function useCodingAssistant(
       timestamp: Date.now(),
       history: pending.history,
       uiMessages: normalizeForSave(uiMessages),
+      // Carry the summary forward so later saves don't wipe the recent-list label.
+      ...(summaryRef.current ? { summary: summaryRef.current } : {}),
     };
     void saveConversation(pending.workspacePath, record)
       .then(() => {
@@ -174,17 +192,65 @@ export function useCodingAssistant(
   // finishes, so the null guard at the top exits immediately every time.
   }, [conversationSaveRevision, uiMessages]);
 
-  const injectProactiveMessage = useCallback((message: string, collectContext: () => Promise<string>) => {
+  /** Show a transient "working…" assistant bubble; returns its id so injectProactiveMessage can replace it. */
+  const showPendingProactive = useCallback((message: string): string => {
+    const id = uid();
+    setUiMessages(prev => [...prev, {
+      id,
+      role: 'assistant',
+      blocks: [{ type: 'text', content: message }],
+      isStreaming: true,
+      timestamp: Date.now(),
+    }]);
+    return id;
+  }, []);
+
+  const injectProactiveMessage = useCallback((message: string, collectContext: () => Promise<string>, extraBlocks: UIBlock[] = [], replaceId?: string) => {
     const proactiveMsg: UIMessage = {
       id: uid(),
       role: 'assistant',
-      blocks: [{ type: 'text', content: message }],
+      blocks: [{ type: 'text', content: message }, ...extraBlocks],
       isStreaming: false,
       timestamp: Date.now(),
     };
-    setUiMessages(prev => [...prev, proactiveMsg]);
+    setUiMessages(prev => {
+      const idx = replaceId ? prev.findIndex(m => m.id === replaceId) : -1;
+      if (idx === -1) return [...prev, proactiveMsg];
+      const next = [...prev];
+      next[idx] = proactiveMsg;
+      return next;
+    });
     pendingProactiveContextRef.current = collectContext;
+
+    // Persist the injected message so it survives a page reload.
+    const ws = workspacePathRef.current;
+    if (ws) {
+      pendingSaveRef.current = {
+        workspacePath: ws,
+        conversationId: conversationIdRef.current,
+        generation: sessionGenerationRef.current,
+        history: historyRef.current,
+      };
+      setConversationSaveRevision(r => r + 1);
+    }
   }, []);
+
+  /** Set every acknowledge block matching `from` to `to` (optionally only in one message). */
+  const setAcknowledgeStatus = useCallback((from: 'pending', to: 'done' | 'dismissed', msgId?: string) => {
+    setUiMessages(prev => prev.map(msg => {
+      if (msg.role !== 'assistant' || (msgId && msg.id !== msgId)) return msg;
+      if (!msg.blocks.some(b => b.type === 'acknowledge' && b.status === from)) return msg;
+      return {
+        ...msg,
+        blocks: msg.blocks.map(b =>
+          b.type === 'acknowledge' && b.status === from ? { ...b, status: to } : b),
+      };
+    }));
+  }, []);
+
+  const markAcknowledged = useCallback((msgId: string) => {
+    setAcknowledgeStatus('pending', 'done', msgId);
+  }, [setAcknowledgeStatus]);
 
   const sendApproval = useCallback(async (id: string, approved: boolean, scope?: 'exact' | 'directory') => {
     // Update block status immediately so buttons disappear
@@ -425,6 +491,9 @@ export function useCodingAssistant(
     // Injected into the API content only — the UI shows only the user's typed text.
     const collectProactive = pendingProactiveContextRef.current;
     pendingProactiveContextRef.current = null;
+    // Context is consumed by this message, so any remaining Acknowledge button is moot.
+    // (The Acknowledge handler marks its own block 'done' before calling sendMessage.)
+    setAcknowledgeStatus('pending', 'dismissed');
     let proactiveContext = '';
     if (collectProactive) {
       try { proactiveContext = await collectProactive(); } catch { /* ignore — context is best-effort */ }
@@ -450,6 +519,11 @@ export function useCodingAssistant(
     }
     if (extraContext) {
       apiContent += `\n\n---\n${extraContext}`;
+    }
+    // Firewall: mask secrets from every client-side source before it reaches the AI.
+    const redact = redactSecretsEnabledRef.current;
+    if (redact) {
+      apiContent = redactSecrets(apiContent);
     }
     const newHistory: HistoryMessage[] = [...(fresh ? [] : history), { role: 'user', content: apiContent }];
     const controller = new AbortController();
@@ -484,7 +558,7 @@ export function useCodingAssistant(
       const response = await fetch(`${API_BASE}/api/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newHistory, model: modelToUse, provider: provider.id, activeFile: activeFilePath ?? null, tutorMode: tutorMode ?? false }),
+        body: JSON.stringify({ messages: newHistory, model: modelToUse, provider: provider.id, activeFile: activeFilePath ?? null, tutorMode: tutorMode ?? false, redactSecrets: redact }),
         signal: controller.signal,
       });
 
@@ -601,9 +675,6 @@ export function useCodingAssistant(
           } else if (eventName === 'tool_call') {
             flushNow();
             toolUsedInTurnRef.current = true;
-            if (tutorMode) {
-              onToolNarrationRef.current?.(payload.name as string, payload.input as Record<string, unknown>, payload.approval_id as string | undefined);
-            }
             const toolBlock: UIBlock = {
               type: 'tool',
               id: payload.id as string,
@@ -669,6 +740,34 @@ export function useCodingAssistant(
                 history: finalHistory,
               };
               setConversationSaveRevision(revision => revision + 1);
+
+              // After the 3rd assistant reply, generate a summary in the background
+              // and re-save the conversation with it so the recent list shows a label.
+              const assistantCount = finalHistory.filter(m => m.role === 'assistant').length;
+              if (assistantCount >= 3 && !hasSummaryRef.current) {
+                void (async () => {
+                  try {
+                    const resp = await fetch('/api/proactive/conversation-summary', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ history: finalHistory, provider: provider.id, model }),
+                    });
+                    if (!resp.ok || sendGeneration !== sessionGenerationRef.current) return;
+                    const { summary } = await resp.json() as { summary: string | null };
+                    if (!summary) return;
+                    hasSummaryRef.current = true;
+                    summaryRef.current = summary;
+                    await saveConversation(sendWorkspacePath, {
+                      id: sendConversationId,
+                      timestamp: Date.now(),
+                      history: finalHistory,
+                      uiMessages: normalizeForSave(uiMessagesRef.current),
+                      summary,
+                    });
+                    setConversationSaveRevision(r => r + 1);
+                  } catch { /* best effort — summary is optional */ }
+                })();
+              }
             }
             // Notify expansion hook so it can grow/shrink the right panel.
             onAssistantReplyRef.current?.(capturedText, toolUsedInTurnRef.current);
@@ -696,22 +795,39 @@ export function useCodingAssistant(
       thoughtBufRef.current = '';
       const stopped = controller.signal.aborted;
       const errText = err instanceof Error ? err.message : 'Unknown error';
-      setUiMessages(prev => prev.map(m => {
-        if (m.id !== assistantId || m.role !== 'assistant') return m;
-        const blocks = [...m.blocks];
-        for (const [content, type] of [[bufferedThought, 'thought'], [bufferedText, 'text']] as [string, 'thought' | 'text'][]) {
-          if (!content) continue;
-          const last = blocks[blocks.length - 1];
-          if (last?.type === type) blocks[blocks.length - 1] = { ...last, content: last.content + content } as UIBlock;
-          else blocks.push({ type, content } as UIBlock);
+      setUiMessages(prev => {
+        const next = prev.map(m => {
+          if (m.id !== assistantId || m.role !== 'assistant') return m;
+          const blocks = [...m.blocks];
+          for (const [content, type] of [[bufferedThought, 'thought'], [bufferedText, 'text']] as [string, 'thought' | 'text'][]) {
+            if (!content) continue;
+            const last = blocks[blocks.length - 1];
+            if (last?.type === type) blocks[blocks.length - 1] = { ...last, content: last.content + content } as UIBlock;
+            else blocks.push({ type, content } as UIBlock);
+          }
+          if (stopped) {
+            blocks.push({ type: 'text', content: '_Execution stopped._' });
+          } else {
+            blocks.push({ type: 'text', content: `Error: ${errText}` });
+          }
+          return { ...m, isStreaming: false, blocks };
+        });
+        // Save the partial turn so the conversation survives a server restart or page reload.
+        // history = newHistory (includes user message but not the incomplete assistant reply).
+        // uiMessages = next (includes partial tool blocks + error notice).
+        if (sendWorkspacePath && !stopped) {
+          void saveConversation(sendWorkspacePath, {
+            id: sendConversationId,
+            timestamp: Date.now(),
+            history: newHistory,
+            uiMessages: normalizeForSave(next),
+            ...(summaryRef.current ? { summary: summaryRef.current } : {}),
+          }).then(() => {
+            if (sendGeneration === sessionGenerationRef.current) setConversationSaveRevision(r => r + 1);
+          }).catch(() => { /* best effort */ });
         }
-        if (stopped) {
-          blocks.push({ type: 'text', content: '_Execution stopped._' });
-        } else {
-          blocks.push({ type: 'text', content: `Error: ${errText}` });
-        }
-        return { ...m, isStreaming: false, blocks };
-      }));
+        return next;
+      });
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null;
       if (sendGeneration === sessionGenerationRef.current) setIsLoading(false);
@@ -732,6 +848,9 @@ export function useCodingAssistant(
     setIsLoading(false);
     setIsWatching(false);
     conversationIdRef.current = uid(); // fresh ID for the next conversation
+    // Drop the previous conversation's label so it isn't stamped onto the new one.
+    hasSummaryRef.current = false;
+    summaryRef.current = undefined;
     setUiMessages([]);
     setHistory([]);
   }, []);
@@ -751,6 +870,8 @@ export function useCodingAssistant(
     setIsLoading(false);
     setIsWatching(false);
     conversationIdRef.current = record.id;
+    hasSummaryRef.current = !!record.summary;
+    summaryRef.current = record.summary;
     setUiMessages(record.uiMessages);
     setHistory(record.history);
   }, []);
@@ -793,6 +914,8 @@ export function useCodingAssistant(
     clearMessages,
     sendApproval,
     injectProactiveMessage,
+    showPendingProactive,
+    markAcknowledged,
     notifyEditorActivity,
     loadConversation,
     retryConversationSave,

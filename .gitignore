@@ -3,6 +3,5 @@ dist/
 .DS_Store
 *.local
 .env
-package-lock.json
 __pycache__/
 **/uv.lock

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   fetchGitChanges, fetchGitLog, fetchGitBranches,
   stageFile, unstageFile, stageAll, discardFile, commitChanges,
-  checkoutBranch, stashChanges, pushBranch, pullBranch
+  checkoutBranch, stashChanges, pushBranch, pullBranch, fetchTags
 } from '../api/files';
 import type { GitChange, GitCommit, GitBranchInfo, GitBranches } from '../api/files';
 
@@ -186,12 +186,13 @@ export function useSourceControl(workspacePath: string | null) {
     }
   };
 
-  const pull = async () => {
+  const pull = async (mode: 'pull' | 'fetchTags' = 'pull') => {
     if (pullStatus === 'pulling') return;
     setPullStatus('pulling');
     setPullError('');
     try {
-      await pullBranch();
+      if (mode === 'fetchTags') await fetchTags();
+      else await pullBranch();
       setPullStatus('success');
       await refresh();
       setTimeout(() => setPullStatus(prev => prev === 'success' ? null : prev), 3000);

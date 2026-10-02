@@ -25,22 +25,43 @@ interface InlineSystemGraphProps {
   onNavigateToLine?: (filePath: string, line: number, endLine?: number) => void;
   /** Node name currently active in the full System View (from activeSystemNode state). */
   activeSystemNode?: string | null;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
-export function InlineSystemGraph({ graph, workspacePath, onOpenIogram, onNavigateToLine, activeSystemNode }: InlineSystemGraphProps) {
+export function InlineSystemGraph({
+  graph,
+  workspacePath,
+  onOpenIogram,
+  onNavigateToLine,
+  activeSystemNode,
+  collapsed: controlledCollapsed,
+  onCollapsedChange,
+}: InlineSystemGraphProps) {
   const [selected, setSelected] = useState<GraphSelection>(null);
-  const [collapsed, setCollapsed] = useState(true);
+  const [internalCollapsed, setInternalCollapsed] = useState(true);
   const canvasRef = useRef<SystemGraphCanvasHandle>(null);
 
+  const isControlled = controlledCollapsed !== undefined;
+  const collapsed = isControlled ? controlledCollapsed : internalCollapsed;
+
+  const setCollapsed = (valueOrUpdater: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof valueOrUpdater === 'function' ? valueOrUpdater(collapsed) : valueOrUpdater;
+    if (!isControlled) {
+      setInternalCollapsed(next);
+    }
+    onCollapsedChange?.(next);
+  };
+
   // Sync selection + pan whenever the active system node changes externally.
-  // Also auto-expand when a match is found.
+  // Intentionally does NOT auto-expand — the panel stays collapsed unless the
+  // user toggles it (the full Iogram tab is available for a larger view).
   useEffect(() => {
     if (!activeSystemNode) return;
     const node = graph.nodes.find(n => n.name === activeSystemNode);
     if (!node) return;
     const sel: GraphSelection = { type: 'node', id: node.id };
     setSelected(sel);
-    setCollapsed(false);
     requestAnimationFrame(() => canvasRef.current?.panToItem(sel));
   }, [activeSystemNode, graph.nodes]);
 

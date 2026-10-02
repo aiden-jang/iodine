@@ -43,10 +43,7 @@ export function setupTerminalWebSocket(server: Server): void {
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url!, 'http://localhost');
-    if (url.pathname !== '/terminal') {
-      socket.destroy();
-      return;
-    }
+    if (url.pathname !== '/terminal') return; // other paths handled by their own upgrade listeners
     wss.handleUpgrade(req, socket as never, head, (ws) => {
       wss.emit('connection', ws, req);
     });
@@ -78,7 +75,8 @@ export function setupTerminalWebSocket(server: Server): void {
     let args: string[];
     if (process.platform === 'win32') {
       // None of the POSIX shells below exist on Windows; use the system shell.
-      shell = process.env.ComSpec || 'powershell.exe';
+      // Fall back to cmd.exe (not PowerShell) — the /d /s /c args below are cmd-only.
+      shell = process.env.ComSpec || 'cmd.exe';
       args = cmdParam ? ['/d', '/s', '/c', cmdParam] : [];
     } else {
       if (!existsSync(shell)) {

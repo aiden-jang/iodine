@@ -5,8 +5,9 @@ import type { CodingAssistantHandle } from '../right/CodingAssistant';
 import { SystemView } from '../right/SystemView';
 import type { SystemViewHandle } from '../right/SystemView';
 import { BuildAssistant } from '../right/BuildAssistant';
+import { MeetingWhiteboard } from '../right/MeetingWhiteboard';
 import type { Provider } from '../../providers';
-import type { FileNode } from '../../types';
+import type { FileNode, UIBlock } from '../../types';
 import { useSystemGraph } from '../../hooks/useSystemGraph';
 import type { SystemGraph } from '../../api/files';
 
@@ -21,7 +22,9 @@ export interface RightPanelHandle {
    *  Returns the matched node/edge name, or null if no graph / no match. */
   syncActiveFile: (path: string | null) => string | null;
   /** Inject a proactive AI message into the Coding Assistant chat. */
-  injectProactiveMessage: (message: string, collectContext: () => Promise<string>) => void;
+  injectProactiveMessage: (message: string, collectContext: () => Promise<string>, extraBlocks?: UIBlock[], replaceId?: string) => void;
+  /** Show a transient "working…" bubble in the chat; returns its id (null if the assistant isn't mounted). */
+  showPendingProactive: (message: string) => string | null;
   /** Start the looping yellow attention pulse on the panel border. */
   triggerPulse: () => void;
   /** Stop the pulse immediately (e.g. user started typing). */
@@ -59,10 +62,22 @@ interface RightPanelProps {
   onSummaryRequest?: (filePath: string) => void;
   commitDiffContext?: { shortHash: string; content: string } | null;
   onClearCommitDiffContext?: () => void;
+  /** When true, locks the panel to the Coding Assistant tab for the duration of a live meeting. */
+  meetingActive?: boolean;
+  /** Starts a live meeting session, optionally with prior conversation context. */
+  onMeetingStart?: (context?: string) => void;
+  /** Error message from the live meeting hook, if any. */
+  meetingError?: string | null;
+  /** Current shared whiteboard content (shown during live meetings). */
+  whiteboardContent?: string;
+  /** Append text to the shared whiteboard. */
+  onWhiteboardAppend?: (text: string) => void;
+  /** Clear the shared whiteboard. */
+  onWhiteboardClear?: () => void;
 }
 
 export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(
-function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspaceOpen, provider, model, setProvider, setModel, getEditorContext, runCommandInTerminal, contextNodes, onRemoveContextNode, onClearContextNodes, onNavigateToLine, onOpenUrl, activeSystemNode, onUserTyping, onMessageSent, onAssistantBusyChange, onWatchTrigger, onAssistantReply, onFileTreeRefresh, onSummaryRequest, commitDiffContext, onClearCommitDiffContext }, ref) {
+function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspaceOpen, provider, model, setProvider, setModel, getEditorContext, runCommandInTerminal, contextNodes, onRemoveContextNode, onClearContextNodes, onNavigateToLine, onOpenUrl, activeSystemNode, onUserTyping, onMessageSent, onAssistantBusyChange, onWatchTrigger, onAssistantReply, onFileTreeRefresh, onSummaryRequest, commitDiffContext, onClearCommitDiffContext, meetingActive, onMeetingStart, meetingError, whiteboardContent, onWhiteboardAppend, onWhiteboardClear }, ref) {
   const [activeTab, setActiveTab] = useState<RightTab>('assistant');
   const panelRef             = useRef<HTMLDivElement>(null);
   const pulseAutoStopRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,6 +91,11 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
       codingAssistantRef.current?.focus();
     }
   }, [activeTab]);
+
+  // Lock to Coding Assistant for the duration of a live meeting.
+  useEffect(() => {
+    if (meetingActive) setActiveTab('assistant');
+  }, [meetingActive]);
 
   const handleOpenNode = useCallback((_nodeName: string, _nodeId?: string) => {
     // flushSync commits the tab switch synchronously so the SVG has real
@@ -113,9 +133,10 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
       // Tab hidden — select only (can't pan; SVG has no rendered dimensions).
       return systemViewRef.current.selectByPath(path);
     },
-    injectProactiveMessage: (message, collectContext) => {
-      codingAssistantRef.current?.injectProactiveMessage(message, collectContext);
+    injectProactiveMessage: (message, collectContext, extraBlocks, replaceId) => {
+      codingAssistantRef.current?.injectProactiveMessage(message, collectContext, extraBlocks, replaceId);
     },
+    showPendingProactive: (message) => codingAssistantRef.current?.showPendingProactive(message) ?? null,
     triggerPulse: () => {
       const el = panelRef.current;
       if (!el) return;
@@ -153,7 +174,7 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
 
   const renderModelInfo = (tabId: RightTab) => {
     const isEditable = tabId === 'assistant';
-    const editableNote = isEditable ? ' <i style="color: var(--color-text-secondary);">Set in Coding Assistant</i>' : '';
+    const editableNote = isEditable ? ' <i style="color: var(--color-text-secondary);">Set in Conversation</i>' : '';
 
     return (
       <div
@@ -186,10 +207,10 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
   return (
     <div
       ref={panelRef}
+      className="panel-card"
       style={{
         width,
         background: 'var(--color-bg-right-panel)',
-        borderLeft: '1px solid var(--color-border)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -208,34 +229,39 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
         }}
       >
         {([
-          { id: 'assistant', label: 'Coding Assistant' },
+          { id: 'assistant', label: 'Conversation' },
           { id: 'build',     label: 'Build' },
           { id: 'system',    label: 'Iogram' },
-        ] as { id: RightTab; label: string }[]).map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid var(--color-accent, #0e639c)' : '2px solid transparent',
-              cursor: 'pointer',
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              flexShrink: 0,
-              whiteSpace: 'nowrap',
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+        ] as { id: RightTab; label: string }[]).map(tab => {
+          const locked = meetingActive && tab.id !== 'assistant';
+          return (
+            <button
+              key={tab.id}
+              onClick={() => { if (!locked) setActiveTab(tab.id); }}
+              disabled={locked}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === tab.id ? '2px solid var(--color-accent, #0e639c)' : '2px solid transparent',
+                cursor: locked ? 'not-allowed' : 'pointer',
+                padding: '0 12px',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                opacity: locked ? 0.3 : 1,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Model info section - only show for non-assistant tabs */}
@@ -253,6 +279,15 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
       </div>
 
       <div style={{ flex: 1, display: activeTab === 'assistant' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Whiteboard fills the full content area during live meetings; chat stays mounted but hidden */}
+        {meetingActive && (
+          <MeetingWhiteboard
+            content={whiteboardContent ?? ''}
+            onAppend={onWhiteboardAppend ?? (() => {})}
+            onClear={onWhiteboardClear}
+          />
+        )}
+        <div style={{ flex: 1, display: meetingActive ? 'none' : 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <CodingAssistant ref={codingAssistantRef} workspacePath={workspacePath} activeFilePath={activeFilePath} onWorkspaceOpen={onWorkspaceOpen}
           provider={provider} model={model} setProvider={setProvider} setModel={setModel} getEditorContext={getEditorContext}
           contextNodes={contextNodes} onRemoveContextNode={onRemoveContextNode} onClearContextNodes={onClearContextNodes}
@@ -266,7 +301,11 @@ function RightPanel({ width, animated, workspacePath, activeFilePath, onWorkspac
           onFileTreeRefresh={onFileTreeRefresh}
           onSummaryRequest={onSummaryRequest}
           commitDiffContext={commitDiffContext}
-          onClearCommitDiffContext={onClearCommitDiffContext} />
+          onClearCommitDiffContext={onClearCommitDiffContext}
+          meetingActive={meetingActive}
+          onMeetingStart={onMeetingStart}
+          meetingError={meetingError} />
+        </div>
       </div>
     </div>
   );

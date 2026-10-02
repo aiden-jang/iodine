@@ -5,7 +5,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
-import { buildTree, readFileContent, writeFileContent, readExternalFile, writeExternalFile } from '../services/fileSystem';
+import { buildTree, readFileContent, writeFileContent, readExternalFile, writeExternalFile, resolveWorkspacePath } from '../services/fileSystem';
 import { rootPath, setRootPath, clearRootPath } from '../state';
 
 const execAsync = promisify(exec);
@@ -235,8 +235,9 @@ router.get('/files/content', async (req, res) => {
     return res.status(400).json({ error: 'path query param is required' });
   }
   try {
-    const content = await readFileContent(filePath, rootPath);
-    return res.json({ path: filePath, content, encoding: 'utf-8' });
+    const absPath = resolveWorkspacePath(filePath, rootPath);
+    const content = await readFileContent(absPath, rootPath);
+    return res.json({ path: absPath, content, encoding: 'utf-8' });
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException & { code?: string };
     if (e.code === 'OUTSIDE_ROOT') return res.status(400).json({ error: e.message });
@@ -741,6 +742,17 @@ router.post('/git/pull', async (req, res) => {
       status: 'pull_failed',
       error: e.stderr ?? e.message 
     });
+  }
+});
+
+router.post('/git/fetch-tags', async (_req, res) => {
+  if (!rootPath) return res.status(400).json({ error: 'No workspace open' });
+  try {
+    await execFileAsync('git', ['fetch', '--tags'], { cwd: rootPath });
+    return res.json({ ok: true, status: 'success', message: 'Fetched tags' });
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; message: string };
+    return res.status(500).json({ ok: false, status: 'fetch_failed', error: e.stderr ?? e.message });
   }
 });
 

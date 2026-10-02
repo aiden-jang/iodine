@@ -16,9 +16,12 @@ import { useUpdateCheck } from '../../hooks/useUpdateCheck';
 import { useProactiveHelp } from '../../hooks/useProactiveHelp';
 import { createIdleChurnSignal } from '../../services/proactiveSignals';
 import { usePanelExpansion, DEFAULT_PANEL_EXPANSION_CONFIG } from '../../hooks/usePanelExpansion';
+import { useLiveMeeting } from '../../hooks/useLiveMeeting';
+import type { EditorTabs } from '../../hooks/geminiMessage';
 import { PROVIDERS, DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../providers';
 import type { Provider } from '../../providers';
 import type { FileNode, SidebarView } from '../../types';
+import { useSetting } from '../../settings';
 
 const SIDEBAR_DEFAULT = 320;
 const RIGHT_PANEL_DEFAULT = 400;
@@ -131,6 +134,66 @@ export function WorkbenchLayout() {
     try { localStorage.setItem('iodine-provider', p.id); } catch { /* storage unavailable */ }
   }, [setModel]);
 
+  // ── Live meeting ──────────────────────────────────────────────────────────
+  const providerRef = useRef(provider);
+  providerRef.current = provider;
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
+  // Stable ref updated after handleNavigateToLine is defined (below); keeps useLiveMeeting's
+  // navigate callback always current without causing a dependency-order issue.
+  const meetingNavigateRef = useRef<((path: string, line?: number) => void) | undefined>(undefined);
+  // Same pattern for open tabs: useOpenFiles is called below, so read through a ref.
+  const meetingTabsRef = useRef<EditorTabs>({ root: null, paths: [], active: null });
+
+  const [whiteboardContent, setWhiteboardContent] = useState('');
+  const whiteboardRef = useRef('');
+  whiteboardRef.current = whiteboardContent;
+
+  const appendWhiteboard = useCallback((text: string) => {
+    setWhiteboardContent(prev => prev ? `${prev}\n${text}` : text);
+  }, []);
+  const clearWhiteboard = useCallback(() => setWhiteboardContent(''), []);
+  const getWhiteboard = useCallback(() => whiteboardRef.current, []);
+
+  const liveMeeting = useLiveMeeting(provider.id, async (transcript) => {
+    // Immediate feedback while the summary request runs; replaced in place below.
+    const pendingId = rightPanelRef.current?.showPendingProactive('✍️ _Writing up meeting notes…_') ?? undefined;
+    // Summary on top; raw transcript tucked into a collapsible block below.
+    let display = '✍️ **Meeting notes**\n\n_Summary unavailable — see the transcript below._';
+    try {
+      const r = await fetch('/api/proactive/meeting-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          provider: providerRef.current.id,
+          model: modelRef.current,
+        }),
+      });
+      if (r.ok) {
+        const { summary } = await r.json() as { summary: string | null };
+        if (summary) display = `✍️ **Meeting notes**\n\n${summary}`;
+      } else {
+        console.warn('[meeting-summary] HTTP', r.status);
+      }
+    } catch (err) { console.warn('[meeting-summary] request failed', err); }
+    const context = `Meeting summary shown to the user:\n${display}\n\nFull meeting transcript:\n${transcript}`;
+    rightPanelRef.current?.injectProactiveMessage(display, async () => context, [
+      { type: 'collapsible', title: 'Meeting transcript', content: transcript },
+      { type: 'acknowledge', status: 'pending' },
+    ], pendingId);
+  }, (path: string, line?: number) => meetingNavigateRef.current?.(path, line), () => meetingTabsRef.current, () => {
+    const content = editorAreaRef.current?.getVisibleContext();
+    if (!content) return null;
+    const abs = activeFilePathRef.current;
+    const root = workspacePathRef.current;
+    const path = abs && root
+      ? (abs.startsWith(root + '/') ? abs.slice(root.length + 1) : abs)
+      : (abs ?? '');
+    return path ? { path, content } : null;
+  }, getWhiteboard, appendWhiteboard, clearWhiteboard);
+
   const pushNav = useCallback((path: string) => {
     setNav(prev => {
       const truncated = prev.stack.slice(0, prev.index + 1);
@@ -176,7 +239,14 @@ export function WorkbenchLayout() {
     reorderFiles,
     refreshFile,
     setSortedFiles,
+    openSettings,
   } = useOpenFiles();
+
+  meetingTabsRef.current = {
+    root: workspacePath ?? null,
+    paths: openFiles.filter(f => !f.path.startsWith('http') && !f.isSettings).map(f => f.path),
+    active: activeFilePath ?? null,
+  };
 
   useFileWatcher(workspacePath, refreshFile);
 
@@ -221,9 +291,11 @@ export function WorkbenchLayout() {
     getActiveFilePath: () => activeFilePathRef.current,
   }), []); // stable — accessors read from refs at collection time
 
+  const [churnDetectionEnabled] = useSetting('proactive.churnDetection');
+
   const { status: proactiveStatus, startCooldown: startProactiveCooldown, setAssistantBusy } = useProactiveHelp({
     signals: [idleChurnSignal],
-    enabled: !!workspacePath,
+    enabled: !!workspacePath && churnDetectionEnabled,
     actionCountRef,
     onTrigger: async (message, collectContext) => {
       const rephrased = await rephraseProactiveMessage(message, provider.id, model);
@@ -268,6 +340,7 @@ export function WorkbenchLayout() {
       editorAreaRef.current?.navigateToLine(filePath, line, endLine, startCol, endCol);
     }, 100);
   }, [openFile]);
+  meetingNavigateRef.current = (path: string, line?: number) => handleNavigateToLine(path, line ?? 1);
 
   /** Open a file and request the editor to display its AI summary. */
   const handleFileSummary = useCallback((node: FileNode) => {
@@ -444,7 +517,7 @@ export function WorkbenchLayout() {
         height: '100vh',
         width: '100vw',
         overflow: 'hidden',
-        background: 'var(--color-bg-workbench)',
+        background: 'var(--color-bg-app)',
       }}
     >
       {/* Workspace switch confirmation dialog */}
@@ -457,11 +530,11 @@ export function WorkbenchLayout() {
           <div style={{
             background: 'var(--color-bg-sidebar)',
             border: '1px solid var(--color-border)',
-            borderRadius: 6,
+            borderRadius: 'var(--radius-lg)',
             padding: '20px 24px',
             maxWidth: 420,
             width: '90%',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            boxShadow: 'var(--shadow-lg)',
           }}>
             <div style={{ fontSize: 13, color: 'var(--color-text-primary)', whiteSpace: 'pre-wrap', marginBottom: 20, lineHeight: 1.6 }}>
               {workspaceConfirm.message}
@@ -512,18 +585,24 @@ export function WorkbenchLayout() {
         onToggleBottomTray={() => setShowBottomTray(v => !v)}
         updateInfo={updateInfo}
         onSnoozeUpdate={snoozeUpdate}
+        onOpenSettings={openSettings}
       />
 
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      {/* Padding here + the 6px ResizeDividers form the gutters between panel cards */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', padding: '0 6px 6px' }}>
         {/* Main row: sidebar + editor + right panel */}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
           <ActivityBar
             activeView={activeView}
             onViewChange={handleViewChange}
             gitChangeCount={gitChangeCount}
           />
 
-          <div style={{ display: showSidebar ? 'contents' : 'none' }}>
+          <div
+            className="sidebar-group"
+            data-visible={showSidebar}
+            style={{ display: showSidebar ? 'contents' : 'none' }}
+          >
             <Sidebar
               activeView={activeView}
               width={sidebarWidth}
@@ -557,6 +636,7 @@ export function WorkbenchLayout() {
               min={SIDEBAR_MIN}
               max={SIDEBAR_MAX}
               side="left"
+              joined
             />
           </div>
 
@@ -591,15 +671,28 @@ export function WorkbenchLayout() {
             onCommitDiffClose={() => setActiveCommitHash(null)}
             onCommitCheckout={handleCommitCheckout}
             onCommitDiffAddToContext={(shortHash, content) => setCommitDiffContext({ shortHash, content })}
+            activeMeeting={liveMeeting.isActive}
+            onMeetingClose={liveMeeting.stop}
+            meetingAnalyserNode={liveMeeting.analyserNode}
+            meetingMicAnalyserNode={liveMeeting.micAnalyserNode}
+            meetingSpeaking={liveMeeting.speaking}
+            meetingMuted={liveMeeting.isMuted}
+            onMeetingMuteToggle={liveMeeting.toggleMute}
+            joinedRight={showRightPanel}
           />
 
-          <div style={{ display: showRightPanel ? 'contents' : 'none' }}>
+          <div
+            className="right-panel-group"
+            data-visible={showRightPanel}
+            style={{ display: showRightPanel ? 'contents' : 'none' }}
+          >
             <ResizeDivider
               currentWidth={effectiveRightWidth}
               onResize={(w) => { setRightPanelWidth(w); resetExpansion(); }}
               min={RIGHT_MIN}
               max={RIGHT_MAX}
               side="right"
+              joined
             />
             <RightPanel
               ref={rightPanelRef}
@@ -629,6 +722,12 @@ export function WorkbenchLayout() {
               onSummaryRequest={handleAgentSummaryRequest}
               commitDiffContext={commitDiffContext}
               onClearCommitDiffContext={() => setCommitDiffContext(null)}
+              meetingActive={liveMeeting.isActive}
+              onMeetingStart={(ctx) => { setWhiteboardContent(''); liveMeeting.start(ctx); }}
+              meetingError={liveMeeting.error}
+              whiteboardContent={whiteboardContent}
+              onWhiteboardAppend={appendWhiteboard}
+              onWhiteboardClear={clearWhiteboard}
             />
           </div>
         </div>
@@ -645,7 +744,7 @@ export function WorkbenchLayout() {
           <BottomTray ref={bottomTrayRef} height={trayHeight} workspacePath={workspacePath} />
         </div>
       </div>
-      {workspacePath && <StatusBar proactive={proactiveStatus} lastPingAt={lastPingAt} />}
+      {workspacePath && churnDetectionEnabled && <StatusBar proactive={proactiveStatus} lastPingAt={lastPingAt} />}
     </div>
   );
 }

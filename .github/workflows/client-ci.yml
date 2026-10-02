@@ -4,11 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - 'client/tests/**'
+      - 'client/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/client-ci.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'client/tests/**'
+      - 'client/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/client-ci.yml'
 
 jobs:
   test:

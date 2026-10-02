@@ -50,6 +50,7 @@ export async function runAgentLoop(
   activeFile: string | null = null,
   customSystemPrompt?: string,
   tutorMode?: boolean,
+  redact: boolean = true,
 ) {
   const apiKey = await loadApiKey();
   const client = new Anthropic({ apiKey });
@@ -103,7 +104,7 @@ export async function runAgentLoop(
       if (abortSignal.aborted) return;
       writeSSE(res, 'tool_call', { id: toolUse.id, name: toolUse.name, input: toolUse.input, approval_id: toolUse.name === 'run_terminal_command' ? toolUse.id : undefined });
 
-      const result = await executeAgentTool(toolUse.name, toolUse.input as Record<string, unknown>, res, abortSignal, toolUse.id);
+      const result = await executeAgentTool(toolUse.name, toolUse.input as Record<string, unknown>, res, abortSignal, toolUse.id, redact);
       writeSSE(res, 'tool_result', {
         tool_use_id: toolUse.id,
         name: toolUse.name,

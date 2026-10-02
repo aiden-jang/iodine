@@ -141,4 +141,152 @@ router.post('/proactive/watch', async (req, res) => {
   }
 });
 
+const MEETING_SUMMARY_SYSTEM = `You are a meeting notes assistant. Given the transcript of a voice conversation between a developer and an AI coding assistant, produce clean, concise meeting notes in markdown.
+
+Use this structure (omit a section if there's nothing to put there):
+
+**Overview**
+2–3 sentences on the purpose of the meeting and the overall outcome.
+
+**What was Discussed**
+- Bullet list of the main topics, including any decisions made and why.
+
+**Next Steps**
+- Bullet list of concrete things the AI should implement or follow up on after the meeting.
+
+Be specific — reference actual files, features, or bugs discussed. No filler or generic phrasing. Keep it tight.
+
+Refer to the AI participant as "the assistant", never by a model or vendor name (e.g. Gemini, Claude, GPT), even if the transcript uses one.`;
+
+router.post('/proactive/meeting-summary', async (req, res) => {
+  const { transcript, provider, model } = req.body as {
+    transcript: string;
+    provider: string;
+    model: string;
+  };
+
+  try {
+    let summary = '';
+
+    if (provider === 'anthropic') {
+      const client = new Anthropic({ apiKey: await loadApiKey() });
+      const response = await client.messages.create({
+        model,
+        max_tokens: 1500,
+        system: MEETING_SUMMARY_SYSTEM,
+        messages: [{ role: 'user', content: transcript }],
+      });
+      const textBlock = response.content.find((b) => b.type === 'text');
+      if (textBlock?.type === 'text') summary = textBlock.text.trim();
+      if (!summary) {
+        console.warn('[meeting-summary] anthropic raw', {
+          stop_reason: response.stop_reason,
+          types: response.content.map((b) => b.type),
+        });
+      }
+
+    } else if (provider === 'openai') {
+      const client = new OpenAI({ apiKey: await loadOpenAIKey() });
+      const response = await client.chat.completions.create({
+        model,
+        max_completion_tokens: 4000,
+        messages: [
+          { role: 'system', content: MEETING_SUMMARY_SYSTEM },
+          { role: 'user', content: transcript },
+        ],
+      });
+      summary = response.choices[0]?.message?.content?.trim() ?? '';
+
+    } else {
+      const ai = new GoogleGenAI({ apiKey: await loadGeminiKey() });
+      const response = await ai.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: transcript }] }],
+        config: { systemInstruction: MEETING_SUMMARY_SYSTEM },
+      });
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      summary = parts
+        .filter((p) => p.text && !p.thought)
+        .map((p) => p.text)
+        .join('')
+        .trim();
+      if (!summary) {
+        console.warn('[meeting-summary] gemini raw', {
+          finishReason: response.candidates?.[0]?.finishReason,
+          partCount: parts.length,
+        });
+      }
+    }
+
+    if (!summary) console.warn('[meeting-summary] model returned empty summary', { provider, model });
+    res.json({ summary: summary || null });
+  } catch (err) {
+    console.error('[meeting-summary] failed', { provider, model }, err);
+    res.json({ summary: null });
+  }
+});
+
+const CONVERSATION_SUMMARY_SYSTEM = `Summarize this conversation in one short phrase of 5–8 words. Focus on the main task or question. No punctuation at the end. No quotes. Examples: "Debugging the auth token refresh flow", "Adding dark mode to the editor", "Explaining the React reconciliation algorithm"`;
+
+router.post('/proactive/conversation-summary', async (req, res) => {
+  const { history, provider, model } = req.body as {
+    history: { role: 'user' | 'assistant'; content: string }[];
+    provider: string;
+    model: string;
+  };
+
+  const userContent = history.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+
+  try {
+    let summary = '';
+
+    if (provider === 'anthropic') {
+      const client = new Anthropic({ apiKey: await loadApiKey() });
+      const response = await client.messages.create({
+        model,
+        max_tokens: 200,
+        system: CONVERSATION_SUMMARY_SYSTEM,
+        messages: [{ role: 'user', content: userContent }],
+      });
+      summary = response.content
+        .flatMap(b => (b.type === 'text' ? [b.text] : []))
+        .join('')
+        .trim();
+      if (!summary) {
+        console.warn('[conversation-summary] empty Anthropic response', {
+          model,
+          stop_reason: response.stop_reason,
+          blockTypes: response.content.map(b => b.type),
+        });
+      }
+
+    } else if (provider === 'openai') {
+      const client = new OpenAI({ apiKey: await loadOpenAIKey() });
+      const response = await client.chat.completions.create({
+        model,
+        max_completion_tokens: 40,
+        messages: [
+          { role: 'system', content: CONVERSATION_SUMMARY_SYSTEM },
+          { role: 'user', content: userContent },
+        ],
+      });
+      summary = response.choices[0]?.message?.content?.trim() ?? '';
+
+    } else {
+      const ai = new GoogleGenAI({ apiKey: await loadGeminiKey() });
+      const response = await ai.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: userContent }] }],
+        config: { systemInstruction: CONVERSATION_SUMMARY_SYSTEM },
+      });
+      summary = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+    }
+
+    res.json({ summary: summary || null });
+  } catch (err) {
+    console.error('[conversation-summary] failed', { provider, model, err });
+    res.json({ summary: null });
+  }
+});
+
 export default router;

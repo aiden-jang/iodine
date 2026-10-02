@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const nodeModules = resolve(repositoryRoot, 'node_modules');
 
 function getGitVersion(): string {
   try {
@@ -34,6 +35,23 @@ function getGitRepo(): string {
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    esbuildOptions: {
+      plugins: [
+        {
+          name: 'fix-monaco-editor-subpath-exports',
+          setup(build) {
+            // esbuild applies monaco-editor's "./*" export map pattern to subpath imports
+            // like "monaco-editor/esm/vs/editor/editor.api" and incorrectly doubles the
+            // prefix → "esm/vs/esm/vs/…". Intercept and resolve to the real file paths.
+            build.onResolve({ filter: /^monaco-editor\/esm\// }, args => ({
+              path: resolve(nodeModules, args.path + '.js'),
+            }));
+          },
+        },
+      ],
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(getGitVersion()),
     __APP_REPO__: JSON.stringify(getGitRepo()),

@@ -1,6 +1,6 @@
 # Contributing to Iodine
 
-Iodine — IDE for Open-source Development — is built to be forked and extended. This guide covers the project structure, common extension points, local development, AI features, and API reference.
+Iodine — AI Codebase Harness & Mentor — is built to be forked and extended. This guide covers the project structure, common extension points, local development, AI features, and API reference.
 
 ## Project Structure
 
@@ -19,10 +19,12 @@ iodine/
 │       ├── hooks/            # Workspace, Git, terminal, and assistant state
 │       ├── services/         # Client-side feature services
 │       ├── utils/            # Shared frontend utilities
+│       ├── settings/         # Settings schema, storage backend, and React context
 │       └── components/
 │           ├── layout/       # WorkbenchLayout, MenuBar, ActivityBar, Sidebar, EditorArea, RightPanel
 │           ├── sidebar/      # File explorer and source-control views
 │           ├── editor/       # Tabs, Monaco editor, previews, and welcome UI
+│           ├── settings/     # Settings editor tab (SettingsPage, SettingRow)
 │           ├── bottom/       # Bottom tray and terminal sessions
 │           └── right/        # CodingAssistant, BuildAssistant, SystemView
 │
@@ -124,6 +126,27 @@ Agent tools are declared once and exposed to Anthropic, Gemini, and OpenAI autom
 7. Run `npm run typecheck` and `npm run build`, then test the tool with each supported provider. For client-facing tools, verify the SSE event reaches the UI and that cancellation or missing input fails safely.
 
 A tool usually touches only `fileTools.ts` when it can execute entirely on the server. Tools that trigger UI behavior commonly also touch `agentTools.ts`, `useCodingAssistant.ts`, the relevant UI hook/component, `useToolNarration.ts`, and the system prompt.
+
+### Add a user setting
+
+User settings live in `client/src/settings/` and are opened from **Editor → Settings…**.
+
+- **Schema (`schema.ts`)** — the single source of truth. Each entry in `SETTINGS` declares a namespaced key (`<section>.<name>`, e.g. `editor.vimMode`), `type` (`boolean`, `number`, `string`, `select`), `section`, `label`, optional `description`, and `default`. Groups are listed in `SETTINGS_SECTIONS`.
+- **State (`SettingsContext.tsx`)** — `SettingsProvider` wraps the app in `App.tsx`. Read or write a value with the typed hook: `const [vim, setVim] = useSetting('editor.vimMode')`. `useSettings()` exposes all values plus `resetSetting` / `isModified`.
+- **Storage (`storage.ts`)** — the provider talks only to the `SettingsStorage` interface. The default backend writes to browser `localStorage` under `iodine-settings`. Only values that differ from their defaults are saved, so changing a default reaches users who never touched it. Unknown keys and values that fail type validation are ignored on load.
+- **UI (`components/settings/`)** — `SettingsPage` builds the section sidebar, search, and rows from the schema; `SettingRow` picks a control per setting type.
+- **Settings tab** — the page opens as an editor tab with the reserved path `SETTINGS_TAB_PATH` (`iodine://settings`) and `isSettings: true` on its `OpenFile`, created by `openSettings()` in `useOpenFiles.ts`. `EditorArea` renders `SettingsPage` for it instead of Monaco. Code that treats tabs as real files (diffs, breadcrumbs, file watching, AI context) should skip `isSettings` tabs.
+
+Settings are stored per browser **and** per origin (e.g. `localhost:5173`). They apply to every project opened in that browser, but don't carry over to another browser or if the dev server's port changes. File-based storage with export is planned; it should be a new `SettingsStorage` implementation passed to `SettingsProvider`, with no UI changes.
+
+To add a setting:
+
+1. Add an entry to `SETTINGS` in `client/src/settings/schema.ts` (and a section to `SETTINGS_SECTIONS` if it's a new group). It appears on the Settings page automatically.
+2. Consume it where needed with `useSetting('<key>')`.
+3. For a new setting *type*, extend `SettingDefinition` and `isValidSettingValue` in `schema.ts`, and add a control case in `SettingRow.tsx`.
+4. Extend the tests in `client/src/settings/settings.test.tsx` and `client/src/components/settings/SettingsPage.test.tsx`.
+
+Example: `editor.vimMode` sets the default for every editor tab. The per-tab **Enable/Disable Vim** button in `EditorArea` overrides it for that tab for the current session.
 
 ## Design Principles
 

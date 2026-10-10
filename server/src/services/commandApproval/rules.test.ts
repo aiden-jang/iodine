@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
-import { commonAncestor, deleteRule, findMatch, findSimilarRule, loadRules, saveRule, updateRuleEmbedding } from './rules';
+import { commonAncestor, deleteRule, findMatch, findSimilarRule, loadRules, ruleSummary, saveRule, updateRuleEmbedding } from './rules';
 import { describeCommand, type CommandPart } from './signature';
 
 let workspace: string;
@@ -188,6 +188,19 @@ describe('similar approval suggestions', () => {
     await saveRule(workspace, parts('ls src')[0], [1, 0]);
     expect(await findSimilarRule(workspace, parts('rm -f src/file')[0], [1, 0])).toBeNull();
     expect(await findSimilarRule(workspace, parts('ls dist')[0], [0, 1])).toBeNull();
+  });
+
+  it('keeps existing similar rules scoped to their original folder', async () => {
+    const rule = await saveRule(workspace, parts('mkdir src/legacy')[0], [1, 0], 'similar');
+    expect(rule.similarScope).toBe('workspace');
+
+    const legacyRule = {
+      ...rule,
+      similarScope: undefined,
+      pathPrefix: path.join(workspace, 'src', 'legacy'),
+      pathScopes: [{ path: path.join(workspace, 'src', 'legacy'), descendants: true }],
+    };
+    expect(ruleSummary(legacyRule, workspace)).toBe('similar mkdir for src/legacy and its visible children');
   });
 });
 

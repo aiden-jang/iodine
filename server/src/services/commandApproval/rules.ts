@@ -46,6 +46,7 @@ export interface ApprovalRule extends Signature {
   embeddingModel?: string;
   embeddingFormat?: string;
   similar?: boolean;
+  similarScope?: 'directory' | 'workspace';
   autoApply?: boolean;
 }
 
@@ -99,13 +100,16 @@ export async function saveRule(workspacePath: string, part: CommandPart, embeddi
   if (!part.approvable) throw new Error(part.reason ?? 'command cannot be approved');
   if ((scope === 'directory' || scope === 'similar') && !canUseDirectoryScope(part)) throw new Error('directory scope is unavailable for this command');
 
-  const pathScopes = part.paths.map(target => ({ path: target, descendants: scope !== 'exact' }));
+  const pathScopes = scope === 'similar'
+    ? [{ path: workspacePath, descendants: true }]
+    : part.paths.map(target => ({ path: target, descendants: scope === 'directory' }));
   const rule: ApprovalRule = {
     ...part.signature,
     id: crypto.randomUUID(),
-    pathPrefix: commonAncestor(part.paths),
+    pathPrefix: scope === 'similar' ? workspacePath : commonAncestor(part.paths),
     pathScopes,
     ...(scope === 'similar' ? { similar: true } : {}),
+    ...(scope === 'similar' ? { similarScope: 'workspace' as const } : {}),
     autoApply: true,
     createdAt: Date.now(),
     lastUsedAt: null,
@@ -304,10 +308,18 @@ function label(signature: Signature, scopes: Array<{ path: string; descendants: 
 
 /** Plain-language description of what approving this command would allow, for the button. */
 export function ruleLabel(part: CommandPart, workspacePath: string, scope: RuleScope = 'exact'): string {
-  return label(part.signature, part.paths.map(target => ({ path: target, descendants: scope !== 'exact' })), workspacePath, scope === 'similar' ? 'similar' : 'same');
+  if (scope === 'similar') {
+    const head = [part.signature.program, part.signature.subcommand, ...part.signature.flags, ...(part.signature.literalOperands ?? [])].filter(Boolean).join(' ');
+    return `similar ${head} commands in this project`;
+  }
+  return label(part.signature, part.paths.map(target => ({ path: target, descendants: scope === 'directory' })), workspacePath);
 }
 
 export function ruleSummary(rule: ApprovalRule, workspacePath: string): string {
+  if (rule.similarScope === 'workspace') {
+    const head = [rule.program, rule.subcommand, ...rule.flags, ...(rule.literalOperands ?? [])].filter(Boolean).join(' ');
+    return `similar ${head} commands in this project`;
+  }
   const scopes = rule.pathScopes ?? (rule.pathPrefix === null ? [] : [{ path: rule.pathPrefix, descendants: false }]);
-  return label(rule, scopes, workspacePath);
+  return label(rule, scopes, workspacePath, rule.similar ? 'similar' : 'same');
 }

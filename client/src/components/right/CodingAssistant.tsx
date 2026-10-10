@@ -94,13 +94,13 @@ function CommandApprovalBlock({ block, onApprove, onReject }: { block: UIBlock &
       {block.cwd && <div style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginBottom: 6 }}>in {block.cwd}</div>}
       {block.autoApprovalReason && <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 6 }}>{block.autoApprovalReason}</div>}
       {isPending && block.similarRuleLabel && <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Similar to saved approval: {block.similarRuleLabel}. This command still needs approval.</div>}
-      {isPending && <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-        <button onClick={() => onApprove()} style={{ ...ruleButtonStyle, background: '#1e4a1e', fontWeight: 600 }}>✓ Approve</button>
-        {block.rememberLabel && <button onClick={() => onApprove('exact')} title={`Stops asking for ${block.rememberLabel}`} style={ruleButtonStyle}>✓ Always allow {block.rememberLabel}</button>}
-        {block.directoryLabel && <button onClick={() => onApprove('directory')} title={`Stops asking for ${block.directoryLabel}`} style={ruleButtonStyle}>✓ Always allow {block.directoryLabel}</button>}
-        {block.similarLabel && <button onClick={() => onApprove('similar')} title={`Stops asking for ${block.similarLabel}`} style={{ ...ruleButtonStyle, borderColor: '#4fc1ff60', color: '#4fc1ff' }}>✓ Always allow {block.similarLabel}</button>}
+      {isPending && <><div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 8 }}>Choose how broadly to remember this approval.</div><div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+        <button onClick={() => onApprove()} style={{ ...ruleButtonStyle, background: '#1e4a1e', fontWeight: 600 }}>✓ Approve once</button>
+        {block.rememberLabel && <button onClick={() => onApprove('exact')} title={`Stops asking for ${block.rememberLabel}`} style={ruleButtonStyle}>✓ Remember exact command</button>}
+        {block.directoryLabel && <button onClick={() => onApprove('directory')} title={`Stops asking for ${block.directoryLabel}`} style={ruleButtonStyle}>✓ Remember command in this folder</button>}
+        {block.similarLabel && <button onClick={() => onApprove('similar')} title={`Stops asking for ${block.similarLabel}`} style={{ ...ruleButtonStyle, borderColor: '#4fc1ff60', color: '#4fc1ff' }}>✓ Remember similar commands in this project</button>}
         <button onClick={onReject} style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 999, color: 'var(--color-text-secondary)', fontSize: 11, padding: '5px 13px', cursor: 'pointer' }}>✕ Reject</button>
-      </div>}
+      </div></>}
       {block.output && <pre ref={outputRef} style={{ marginTop: 8, padding: '7px 9px', background: 'var(--color-bg-code)', border: '1px solid var(--color-border)', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', color: 'var(--color-text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 220, overflowY: 'auto' }}>{block.output}</pre>}
     </div>
   </div>;

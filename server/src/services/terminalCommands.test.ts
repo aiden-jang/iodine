@@ -106,7 +106,7 @@ describe('similar approval flow', () => {
     }
   });
 
-  it('auto-applies a similar rule only inside its approved folder with matching flags', async () => {
+  it('auto-applies a similar rule anywhere in the project with matching flags', async () => {
     const described = describeCommand('mkdir src/similar', workspace, workspace);
     if (!described.ok) throw new Error(described.reason);
     await saveRule(workspace, described.parts[0], [1, 0], 'similar');
@@ -114,7 +114,7 @@ describe('similar approval flow', () => {
     const matchingWrites: string[] = [];
     const matchingResponse = { write: (chunk: string) => matchingWrites.push(chunk) } as unknown as Response;
     expect(await requestTerminalApproval(
-      { id: 'similar-child', command: 'mkdir src/similar/child', reason: 'create child', longRunning: false },
+      { id: 'similar-project', command: 'mkdir other-similar', reason: 'create folder', longRunning: false },
       matchingResponse,
       { aborted: false },
     )).toBe(true);
@@ -124,7 +124,7 @@ describe('similar approval flow', () => {
     const hiddenWrites: string[] = [];
     const hiddenResponse = { write: (chunk: string) => hiddenWrites.push(chunk) } as unknown as Response;
     const hiddenApproval = requestTerminalApproval(
-      { id: 'similar-hidden', command: 'mkdir src/similar/.hidden', reason: 'create hidden folder', longRunning: false },
+      { id: 'similar-hidden', command: 'mkdir .hidden-similar', reason: 'create hidden folder', longRunning: false },
       hiddenResponse,
       { aborted: false },
     );
@@ -136,7 +136,7 @@ describe('similar approval flow', () => {
     const flaggedWrites: string[] = [];
     const flaggedResponse = { write: (chunk: string) => flaggedWrites.push(chunk) } as unknown as Response;
     const flaggedApproval = requestTerminalApproval(
-      { id: 'similar-flagged', command: 'mkdir -p src/similar/flagged', reason: 'create folder', longRunning: false },
+      { id: 'similar-flagged', command: 'mkdir -p other-similar/flagged', reason: 'create folder', longRunning: false },
       flaggedResponse,
       { aborted: false },
     );

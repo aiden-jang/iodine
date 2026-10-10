@@ -146,6 +146,21 @@ describe('similar approval flow', () => {
     expect(await flaggedApproval).toBe(false);
   });
 
+  it('offers no broad scopes for a hidden path', async () => {
+    const writes: string[] = [];
+    const response = { write: (chunk: string) => writes.push(chunk) } as unknown as Response;
+    const approval = requestTerminalApproval(
+      { id: 'hidden-scope', command: 'mkdir .private', reason: 'create hidden folder', longRunning: false },
+      response,
+      { aborted: false },
+    );
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toContain('"directoryLabel":null');
+    expect(writes[0]).toContain('"similarLabel":null');
+    await resolveTerminalApproval('hidden-scope', false);
+    expect(await approval).toBe(false);
+  });
+
   it('automatically applies a newly saved rule without a rollout flag', async () => {
     const described = describeCommand('ls src', workspace, workspace);
     if (!described.ok) throw new Error(described.reason);

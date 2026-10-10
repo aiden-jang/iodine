@@ -40,7 +40,7 @@ async function inspect(command: string, workspace: string | null): Promise<{ par
 
   let similarRuleLabel: string | null = null;
   let autoApprovalReason: string | null = null;
-  if (!matched && described.parts.length === 1 && described.parts[0].approvable) {
+  if (!matched && described.parts.length === 1 && canUseDirectoryScope(described.parts[0], workspace)) {
     const rules = await loadRules(workspace);
     const hasCandidates = rules.some(rule =>
       rule.program === described.parts[0].signature.program &&
@@ -90,9 +90,9 @@ export async function requestTerminalApproval(
     longRunning: request.longRunning,
     cwd: rootPath,
     rememberLabel: remembered && workspace ? parts.map(p => ruleLabel(p, workspace)).join(', ') : null,
-    directoryLabel: remembered && workspace && parts.length === 1 && canUseDirectoryScope(parts[0])
+    directoryLabel: remembered && workspace && parts.length === 1 && canUseDirectoryScope(parts[0], workspace)
       ? ruleLabel(parts[0], workspace, 'directory') : null,
-    similarLabel: remembered && workspace && parts.length === 1 && canUseDirectoryScope(parts[0])
+    similarLabel: remembered && workspace && parts.length === 1 && canUseDirectoryScope(parts[0], workspace)
       ? ruleLabel(parts[0], workspace, 'similar') : null,
     similarRuleLabel,
   })}\n\n`);

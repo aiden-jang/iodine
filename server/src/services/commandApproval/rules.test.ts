@@ -141,6 +141,11 @@ describe('matching', () => {
     expect(await findMatch(workspace, parts('mkdir src/new/.secret'))).toBeNull();
   });
 
+  it('does not save a broad rule for a hidden path', async () => {
+    await expect(saveRule(workspace, parts('mkdir .private')[0], null, 'directory')).rejects.toThrow();
+    await expect(saveRule(workspace, parts('mkdir .private')[0], null, 'similar')).rejects.toThrow();
+  });
+
   it('does not match once a flag is added', async () => {
     await saveRule(workspace, parts('rm dist/file')[0]);
     expect(await findMatch(workspace, parts('rm -f dist/file'))).toBeNull();

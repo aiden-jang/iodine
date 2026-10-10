@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
-import { coveredByPrefix } from './operands';
+import { coveredByPrefix, hasHiddenSegment } from './operands';
 import { sameSignature, type CommandPart, type Signature } from './signature';
 import { COMMAND_EMBEDDING_FORMAT, COMMAND_EMBEDDING_MODEL, commandEmbeddingInput, cosineSimilarity } from './embeddings';
 
@@ -52,8 +52,8 @@ export interface ApprovalRule extends Signature {
 
 export type RuleScope = 'exact' | 'directory' | 'similar';
 
-export function canUseDirectoryScope(part: CommandPart): boolean {
-  if (!part.approvable || part.paths.length !== 1) return false;
+export function canUseDirectoryScope(part: CommandPart, workspacePath: string): boolean {
+  if (!part.approvable || part.paths.length !== 1 || hasHiddenSegment(part.paths[0], workspacePath)) return false;
   try { return fs.statSync(part.paths[0]).isDirectory(); } catch { return part.signature.program === 'mkdir'; }
 }
 
@@ -98,7 +98,7 @@ export function commonAncestor(paths: string[]): string | null {
 
 export async function saveRule(workspacePath: string, part: CommandPart, embedding?: number[] | null, scope: RuleScope = 'exact'): Promise<ApprovalRule> {
   if (!part.approvable) throw new Error(part.reason ?? 'command cannot be approved');
-  if ((scope === 'directory' || scope === 'similar') && !canUseDirectoryScope(part)) throw new Error('directory scope is unavailable for this command');
+  if ((scope === 'directory' || scope === 'similar') && !canUseDirectoryScope(part, workspacePath)) throw new Error('directory scope is unavailable for this command');
 
   const pathScopes = scope === 'similar'
     ? [{ path: workspacePath, descendants: true }]

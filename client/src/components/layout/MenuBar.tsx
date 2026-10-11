@@ -87,6 +87,8 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
   const [folderPathInput, setFolderPathInput] = useState('');
   const [folderBrowserLoading, setFolderBrowserLoading] = useState(false);
   const [folderBrowserError, setFolderBrowserError] = useState<string | null>(null);
+  const [folderQuery, setFolderQuery] = useState('');
+  const [showHiddenFolders, setShowHiddenFolders] = useState(false);
   const [projectStatus, setProjectStatus] = useState<{ type: 'downloading' | 'importing' | 'clearing' | 'success' | 'error'; message: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
@@ -99,6 +101,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
   const [fileSearching, setFileSearching] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const folderPathInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -166,6 +169,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
       const result = await browseWorkspaceDirectories(path);
       setFolderBrowser(result);
       setFolderPathInput(result.path);
+      setFolderQuery('');
     } catch (err) {
       setFolderBrowserError(err instanceof Error ? err.message : 'Failed to list folders');
     } finally {
@@ -175,6 +179,8 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
 
   const handleOpenProjectClick = () => {
     setProjectMenuOpen(false);
+    setFolderQuery('');
+    setShowHiddenFolders(false);
     setShowFolderBrowser(true);
     void loadFolderBrowser();
   };
@@ -184,12 +190,18 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
     setFolderBrowser(null);
     setFolderPathInput('');
     setFolderBrowserError(null);
+    setFolderQuery('');
   }, []);
 
   useEffect(() => {
     if (!showFolderBrowser) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeFolderBrowser();
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'l') {
+        event.preventDefault();
+        folderPathInputRef.current?.focus();
+        folderPathInputRef.current?.select();
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -213,6 +225,11 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
   };
 
   const folderBreadcrumbs = folderBrowser?.path.split('/').filter(Boolean) ?? [];
+  const visibleDirectories = folderBrowser?.directories.filter(directory => {
+    if (!showHiddenFolders && directory.name.startsWith('.')) return false;
+    return directory.name.toLocaleLowerCase().includes(folderQuery.trim().toLocaleLowerCase());
+  }) ?? [];
+  const folderName = folderBrowser?.path.split('/').filter(Boolean).at(-1) || 'this folder';
 
   const handleDownloadMetadata = async () => {
     setEditorMenuOpen(false);
@@ -775,41 +792,49 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
               background: 'var(--color-bg-sidebar)',
               border: '1px solid var(--color-border)',
               borderRadius: 6,
-              padding: '20px 24px',
-              width: 460,
+              padding: '20px',
+              width: 560,
+              maxWidth: 'calc(100vw - 48px)',
               boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
             }}
           >
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 6 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
               Open Project
             </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
-              Browse to a folder, or enter its path.
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
+              Choose a folder to use as your project.
             </div>
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               <input
+                ref={folderPathInputRef}
                 value={folderPathInput}
                 onChange={event => setFolderPathInput(event.target.value)}
                 onKeyDown={event => { if (event.key === 'Enter' && folderPathInput.trim()) void loadFolderBrowser(folderPathInput.trim()); }}
-                placeholder="/path/to/project"
-                style={{ flex: 1, minWidth: 0, background: 'var(--color-bg-input)', border: '1px solid var(--color-border)', borderRadius: 4, color: 'var(--color-text-primary)', padding: '6px 8px', fontSize: 12, outline: 'none' }}
+                placeholder="Enter a folder path"
+                aria-label="Folder path"
+                style={{ flex: 1, minWidth: 0, background: 'var(--color-bg-input)', border: '1px solid var(--color-border)', borderRadius: 4, color: 'var(--color-text-primary)', padding: '7px 9px', fontSize: 13, outline: 'none' }}
               />
-              <button onClick={() => folderPathInput.trim() && void loadFolderBrowser(folderPathInput.trim())} disabled={!folderPathInput.trim() || folderBrowserLoading} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', padding: '5px 9px', cursor: folderPathInput.trim() && !folderBrowserLoading ? 'pointer' : 'default', opacity: folderPathInput.trim() && !folderBrowserLoading ? 1 : .45 }}>Go</button>
+              <button onClick={() => folderPathInput.trim() && void loadFolderBrowser(folderPathInput.trim())} disabled={!folderPathInput.trim() || folderBrowserLoading} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', padding: '6px 12px', cursor: folderPathInput.trim() && !folderBrowserLoading ? 'pointer' : 'default', opacity: folderPathInput.trim() && !folderBrowserLoading ? 1 : .45 }}>Go</button>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 8, minHeight: 26 }}>
-              <button onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)} disabled={!folderBrowser?.parentPath || folderBrowserLoading} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', padding: '4px 8px', cursor: folderBrowser?.parentPath && !folderBrowserLoading ? 'pointer' : 'default', opacity: folderBrowser?.parentPath && !folderBrowserLoading ? 1 : .45 }}>↑</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 12, minHeight: 28 }}>
+              <button title="Go to parent folder" aria-label="Go to parent folder" onClick={() => folderBrowser?.parentPath && void loadFolderBrowser(folderBrowser.parentPath)} disabled={!folderBrowser?.parentPath || folderBrowserLoading} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', padding: '4px 9px', cursor: folderBrowser?.parentPath && !folderBrowserLoading ? 'pointer' : 'default', opacity: folderBrowser?.parentPath && !folderBrowserLoading ? 1 : .45 }}>↑</button>
               <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, overflowX: 'auto', color: 'var(--color-text-secondary)', fontSize: 12 }}>
-                <button onClick={() => void loadFolderBrowser('/')} disabled={folderBrowserLoading} style={{ border: 'none', background: 'none', color: 'var(--color-text-secondary)', padding: '3px 2px', cursor: folderBrowserLoading ? 'default' : 'pointer' }}>/</button>
+                <button title="Go to computer root" aria-label="Go to computer root" onClick={() => void loadFolderBrowser('/')} disabled={folderBrowserLoading} style={{ border: 'none', background: 'none', color: 'var(--color-text-secondary)', padding: '3px 4px', cursor: folderBrowserLoading ? 'default' : 'pointer', fontSize: 14 }}>⌂</button>
                 {folderBreadcrumbs.map((segment, index) => {
                   const target = `/${folderBreadcrumbs.slice(0, index + 1).join('/')}`;
-                  return <span key={target} style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>{index > 0 && <span style={{ margin: '0 2px' }}>/</span>}<button onClick={() => void loadFolderBrowser(target)} disabled={folderBrowserLoading} style={{ border: 'none', background: 'none', color: index === folderBreadcrumbs.length - 1 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', padding: '3px 2px', cursor: folderBrowserLoading ? 'default' : 'pointer' }}>{segment}</button></span>;
+                  return <span key={target} style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}><span style={{ margin: '0 3px', opacity: .7 }}>/</span><button onClick={() => void loadFolderBrowser(target)} disabled={folderBrowserLoading} style={{ border: 'none', background: 'none', color: index === folderBreadcrumbs.length - 1 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', padding: '3px 2px', cursor: folderBrowserLoading ? 'default' : 'pointer', fontWeight: index === folderBreadcrumbs.length - 1 ? 600 : 400 }}>{segment}</button></span>;
                 })}
               </div>
             </div>
-            <div style={{ height: 260, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-input)' }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <input value={folderQuery} onChange={event => setFolderQuery(event.target.value)} placeholder="Search this folder" aria-label="Search folders" style={{ flex: 1, minWidth: 0, background: 'var(--color-bg-input)', border: '1px solid var(--color-border)', borderRadius: 4, color: 'var(--color-text-primary)', padding: '6px 8px', fontSize: 12, outline: 'none' }} />
+              <button onClick={() => setShowHiddenFolders(value => !value)} style={{ border: '1px solid var(--color-border)', borderRadius: 4, background: showHiddenFolders ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-secondary)', padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>{showHiddenFolders ? 'Hide hidden' : 'Show hidden'}</button>
+            </div>
+            <div style={{ height: 280, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, background: 'var(--color-bg-input)' }}>
               {folderBrowserLoading && <div style={{ padding: '12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>Loading folders…</div>}
-              {!folderBrowserLoading && folderBrowser?.directories.length === 0 && <div style={{ padding: '12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>No subfolders</div>}
-              {!folderBrowserLoading && folderBrowser?.directories.map(directory => <button key={directory.path} onClick={() => void loadFolderBrowser(directory.path)} style={{ display: 'block', width: '100%', border: 'none', background: 'none', color: 'var(--color-text-primary)', textAlign: 'left', padding: '7px 10px', cursor: 'pointer', fontSize: 12 }} onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>📁 {directory.name}</button>)}
+              {!folderBrowserLoading && folderBrowser?.directories.length === 0 && <div style={{ padding: '16px 12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>This folder is empty.</div>}
+              {!folderBrowserLoading && folderBrowser?.directories.length !== 0 && visibleDirectories.length === 0 && <div style={{ padding: '16px 12px', color: 'var(--color-text-secondary)', fontSize: 12 }}>No matching folders.</div>}
+              {!folderBrowserLoading && visibleDirectories.map(directory => <button key={directory.path} onClick={() => void loadFolderBrowser(directory.path)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', border: 'none', background: 'none', color: 'var(--color-text-primary)', textAlign: 'left', padding: '8px 10px', cursor: 'pointer', fontSize: 13 }} onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}><span aria-hidden="true" style={{ fontSize: 15 }}>📁</span>{directory.name}</button>)}
             </div>
             {folderBrowserError && <div style={{ marginTop: 6, color: '#f48771', fontSize: 12 }}>{folderBrowserError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
@@ -838,7 +863,7 @@ export function MenuBar({ onOpenProject, onCloseProject, onCloseAllTabs, onClose
                   fontWeight: 600,
                 }}
               >
-                {opening ? 'Opening…' : 'Open this folder'}
+                {opening ? 'Opening…' : `Open “${folderName}”`}
               </button>
             </div>
           </div>
